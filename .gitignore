@@ -1,0 +1,13 @@
+# lokale Monaco-Kopie für den Offline-Betrieb (wird bei Bedarf selbst angelegt)
+vendor/
+
+# Betriebssystem und Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Node (erst relevant, wenn ein Build dazukommt)
+node_modules/
+dist/
+*.log

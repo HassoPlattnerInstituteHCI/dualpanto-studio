@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DualPanto Studio</title>
+  <meta name="description" content="Online-Editor für DualPanto-Apps und -Spiele: Level zeichnen, JavaScript schreiben, im Emulator oder auf dem Gerät testen." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e8710a'/%3E%3Ccircle cx='12' cy='18' r='5' fill='white'/%3E%3Ccircle cx='21' cy='12' r='4' fill='white' opacity='.7'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <span class="brand-name">DualPanto <b>Studio</b></span>
+    </div>
+    <div class="project">
+      <label class="sr-only" for="project-name">Projektname</label>
+      <input id="project-name" class="project-name" type="text" autocomplete="off" />
+      <span id="save-state" class="save-state" aria-live="polite">Gespeichert</span>
+    </div>
+    <nav class="file-actions" aria-label="Projekt">
+      <button id="btn-new" class="btn btn-ghost">Neu</button>
+      <button id="btn-open" class="btn btn-ghost">Projekte</button>
+      <input id="file-import" type="file" accept=".json,application/json" hidden />
+    </nav>
+    <div class="spacer"></div>
+    <div class="device">
+      <span id="device-status" class="pill" data-state="emulator">Emulator</span>
+      <label class="check small" title="Gerät beim Verbinden neu starten (empfohlen)"><input id="opt-reset" type="checkbox" checked /> Reset</label>
+      <label class="check small" title="Rand des Me-Bereichs beim Start als Wand anlegen (viele Pakete – zum Testen aus lassen)"><input id="opt-boundary" type="checkbox" /> Rand</label>
+      <button id="btn-connect" class="btn btn-secondary">Gerät verbinden</button>
+      <button id="btn-selftest" class="btn btn-ghost" title="Eine einzelne Testwand anlegen und aktivieren">Selbsttest</button>
+    </div>
+    <div class="run">
+      <button id="btn-run" class="btn btn-primary" title="Strg/⌘ + Enter">▶ Start</button>
+      <button id="btn-restart" class="btn btn-secondary" hidden title="Strg/⌘ + Enter">↻ Neu starten</button>
+      <button id="btn-stop" class="btn btn-stop" hidden>■ Stopp</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="sidebar" aria-label="Projektinhalt">
+      <div class="side-section">
+        <div class="side-head"><span>Programm</span></div>
+        <button id="nav-script" class="nav-item active">
+          <span class="file-icon" aria-hidden="true">JS</span> Skript
+        </button>
+      </div>
+      <div class="side-section grow">
+        <div class="side-head">
+          <span>Level</span>
+          <button id="btn-add-level" class="icon-btn" title="Level hinzufügen" aria-label="Level hinzufügen">＋</button>
+        </div>
+        <ul id="level-list" class="level-list"></ul>
+      </div>
+      <div class="side-section" id="sound-section">
+        <div class="side-head">
+          <span>Sounds</span>
+          <button id="btn-add-sound" class="icon-btn" title="MP3 oder WAV hochladen" aria-label="Sound hochladen">＋</button>
+        </div>
+        <ul id="sound-list" class="sound-list"></ul>
+        <input id="file-sound" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a" multiple hidden />
+      </div>
+      <div class="side-foot muted small">
+        <div id="storage-hint">Alles wird automatisch im Browser gespeichert. Unter „Projekte“ kannst du eine Datei exportieren.</div>
+        <div id="storage-info" class="storage-info"></div>
+      </div>
+    </aside>
+
+    <section class="center" aria-labelledby="center-title">
+      <div class="center-head">
+        <h2 id="center-title">Skript</h2>
+        <div id="level-tabs" class="level-tabs" role="tablist" hidden>
+          <button class="subtab active" role="tab" data-sub="level" aria-selected="true">Level</button>
+          <button class="subtab" role="tab" data-sub="script" aria-selected="false">Skript</button>
+        </div>
+        <div class="spacer"></div>
+        <div id="level-opts" class="level-opts" hidden>
+          <div class="zoom-group" role="group" aria-label="Zoom">
+            <button id="btn-zoom-out" class="icon-btn" title="Verkleinern (−)" aria-label="Verkleinern">−</button>
+            <button id="btn-zoom-level" class="zoom-value" title="Ganzes Spielfeld zeigen (0)">100 %</button>
+            <button id="btn-zoom-in" class="icon-btn" title="Vergrößern (+)" aria-label="Vergrößern">＋</button>
+            <button id="btn-zoom-fit" class="icon-btn" title="Auf Auswahl zoomen (F)" aria-label="Auf Auswahl zoomen">⤢</button>
+          </div>
+          <label class="check small"><input id="opt-snap" type="checkbox" checked /> Raster 5 mm</label>
+          <button id="btn-undo" class="icon-btn" title="Rückgängig (Strg/⌘+Z)" aria-label="Rückgängig">↶</button>
+          <button id="btn-redo" class="icon-btn" title="Wiederholen (Strg/⌘+Umschalt+Z)" aria-label="Wiederholen">↷</button>
+        </div>
+        <span id="script-hint" class="muted small">Strg/⌘ + Enter startet</span>
+      </div>
+      <div id="view-script" class="view">
+        <div id="code" class="code">
+          <div id="code-loading" class="code-loading muted">Editor wird geladen …</div>
+        </div>
+      </div>
+      <div id="view-level" class="view" hidden>
+        <div class="level-toolbar">
+          <div id="tools" class="tools" role="toolbar" aria-label="Werkzeuge"></div>
+        </div>
+        <div class="level-body">
+          <div class="level-canvas-wrap">
+            <canvas id="level-canvas" class="level-canvas" data-no-runtime-keys aria-label="Level-Editor"></canvas>
+            <p id="tool-hint" class="tool-hint"></p>
+          </div>
+          <div id="props" class="props" aria-label="Eigenschaften"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="right" aria-label="Vorschau und Konsole">
+      <div class="stage-wrap">
+        <canvas id="stage" class="stage" tabindex="0" aria-label="Live-Vorschau"></canvas>
+        <div id="stage-hint" class="stage-hint">Me: ziehen · It: Shift + ziehen · gestrichelt: erreichbarer Bereich</div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab active" role="tab" data-tab="console" aria-selected="true">Konsole</button>
+        <button class="tab" role="tab" data-tab="api" aria-selected="false">API</button>
+        <div class="spacer"></div>
+        <label class="check small tab-opt"><input id="opt-devicelog" type="checkbox" /> Geräte-Log</label>
+        <button id="btn-clear" class="link-btn small">Leeren</button>
+      </div>
+      <div id="tab-console" class="tab-body" role="tabpanel">
+        <ol id="console-list" class="console" aria-live="polite"></ol>
+      </div>
+      <div id="tab-api" class="tab-body api" role="tabpanel" hidden>
+        <div id="api-doc" class="api-doc"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="dlg-new" class="dialog">
+    <div class="dialog-head">
+      <h2>Neues Projekt</h2>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button>
+    </div>
+    <p class="muted">Wähle eine Vorlage. Alle Vorlagen laufen sofort im Emulator.</p>
+    <div id="template-grid" class="template-grid"></div>
+  </dialog>
+
+  <dialog id="dlg-open" class="dialog">
+    <div class="dialog-head">
+      <h2>Projekte</h2>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button>
+    </div>
+    <section class="dialog-section">
+      <h3>Ordner auf der Festplatte</h3>
+      <p class="muted small">Ein Projekt als Ordner mit einzelnen Dateien – so könnt ihr zu zweit per git daran arbeiten. Chrome oder Edge am Computer.</p>
+      <div class="dialog-actions">
+        <button id="btn-open-folder" class="btn btn-secondary">Ordner öffnen …</button>
+        <button id="btn-save-folder" class="btn btn-secondary">Projekt in Ordner speichern …</button>
+        <button id="btn-reload-folder" class="btn btn-ghost" hidden>Vom Ordner neu laden</button>
+        <button id="btn-close-folder" class="btn btn-ghost" hidden>Ordner trennen</button>
+      </div>
+      <ul id="folder-list" class="project-list"></ul>
+    </section>
+    <section class="dialog-section">
+      <h3>Im Browser gespeichert</h3>
+      <div class="dialog-actions">
+        <button id="btn-import" class="btn btn-secondary">Datei importieren …</button>
+        <button id="btn-export" class="btn btn-secondary">Aktuelles Projekt exportieren</button>
+      </div>
+      <ul id="project-list" class="project-list"></ul>
+    </section>
+  </dialog>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
