@@ -210,6 +210,162 @@ every(400, () => {
     }),
   },
   {
+    key: 'voice',
+    title: 'Sprach-Notizen (Spracheingabe)',
+    description: 'Aufgabenliste, die man abtastet und per Sprache bedient. Zeigt voice.command, voice.ask und ui.menu.',
+    project: () => ({
+      name: 'Sprach-Notizen',
+      script: `// Produktivitäts-App, die ohne Tastatur auskommt: abtasten mit dem Me-Griff,
+// bedienen mit der Stimme. Das Mikrofon-Feld oben rechts zeigt, ob zugehört wird.
+//
+// Sprachbefehle:
+//   "neue Aufgabe"     fragt nach dem Text und legt sie an
+//   "Aufgabe drei"     wählt den dritten Eintrag und fährt den Griff hin
+//   "erledigt"         hakt den ausgewählten Eintrag ab
+//   "lies vor"         liest alle offenen Aufgaben
+//   "lösche"           löscht den ausgewählten Eintrag (fragt nach)
+//
+// Dauerbetrieb ist bequem, hört aber auch Nebengespräche mit. Alternative:
+// voice.pushToTalk("v")  → Taste halten und sprechen.
+
+const X = 190, Y = 55, ABSTAND = 25;
+
+let todos = storage.get("todos", [
+  { text: "Folien vorbereiten", done: false },
+  { text: "Mail an Betreuer", done: true },
+  { text: "DualPanto kalibrieren", done: false },
+]);
+
+const label = (t) => (t.done ? "erledigt: " : "") + t.text;
+
+const liste = ui.menu(todos.map(label), {
+  x: X, y: Y, spacing: ABSTAND,
+  title: \`Deine Aufgaben. \${todos.length} Einträge. Sag "neue Aufgabe" oder "lies vor".\`,
+  onSelect: (item, i) => abhaken(i),
+});
+
+function speichern() {
+  storage.set("todos", todos);
+  liste.setItems(todos.map(label));
+}
+
+function abhaken(i) {
+  if (!todos[i]) return;
+  todos[i].done = !todos[i].done;
+  speichern();
+  speak(todos[i].done ? "Erledigt" : "Wieder offen", { interrupt: true });
+}
+
+// --- Sprachbefehle ---------------------------------------------------------
+
+voice.command("(neue|neuer|neues) aufgabe", async () => {
+  const text = await voice.ask("Wie heißt die Aufgabe?");
+  if (!text) return speak("Nichts hinzugefügt.");
+  if (!(await voice.confirm(\`\${text}. Soll ich das so eintragen?\`))) return speak("Verworfen.");
+  todos.push({ text, done: false });
+  speichern();
+  speak("Hinzugefügt: " + text);
+});
+
+// {n:zahl} versteht "drei" genauso wie "3"
+voice.command("aufgabe {n:zahl}", async ({ n }) => {
+  const i = n - 1;
+  if (!todos[i]) return speak(\`Es gibt nur \${todos.length} Aufgaben.\`, { interrupt: true });
+  liste.focused = i;
+  speak(label(todos[i]), { interrupt: true });
+  await me.moveTo({ x: X, y: Y + i * ABSTAND });
+});
+
+voice.command("(erledigt|abhaken|fertig)", () => abhaken(liste.focused));
+
+voice.command("(lies vor|vorlesen|was ist offen)", async () => {
+  const offen = todos.filter((t) => !t.done);
+  await speak(\`\${offen.length} offene Aufgaben.\`, { interrupt: true });
+  for (const t of offen) await speak(t.text);
+});
+
+voice.command("(lösche|löschen|weg damit)", async () => {
+  const i = liste.focused;
+  if (!todos[i]) return speak("Nichts ausgewählt. Sag zum Beispiel: Aufgabe eins.");
+  if (!(await voice.confirm(\`\${todos[i].text} wirklich löschen?\`))) return speak("Bleibt stehen.");
+  const [weg] = todos.splice(i, 1);
+  speichern();
+  speak("Gelöscht: " + weg.text, { interrupt: true });
+});
+
+// Alles, was zu keinem Befehl passt, landet hier – gut zum Debuggen.
+voice.command("*", ({ text }) => log("nicht verstanden: " + text));
+
+onKey("m", () => (voice.isListening ? voice.stop() : voice.start()));
+`,
+      levels: [],
+    }),
+  },
+  {
+    key: 'collect',
+    title: 'Sammeln (Gegner & Items)',
+    description: 'Drei Items einsammeln, einem Gegner ausweichen. Zeigt level.entity, patrol, follow und onFrame.',
+    project: () => ({
+      name: 'Sammeln',
+      script: `// Haupt-Skript: Punktestand und Begrüßung.
+// Gegner und Items setzt du im Level-Editor (Werkzeuge "Gegner" und "Item").
+// Sie werden angezeigt und reagieren auf Berührung – am Gerät hängen sie nicht.
+
+state.punkte = 0;
+speak("Sammle die drei Items. Der Gegner läuft hin und her – weiche ihm aus.");
+`,
+      levels: [
+        {
+          id: oid(),
+          name: 'Halle',
+          intro: '',
+          script: `// Level-Skript: hier bekommen die Objekte aus dem Editor ihr Verhalten.
+
+const gegner = level.entity("Wächter");
+gegner.patrol([{ x: 140, y: 80 }, { x: 230, y: 80 }], { speed: 45 });
+
+// Der It-Griff hängt am Gegner: so kann die Person ihn ertasten, während er läuft.
+// (it.stopFollow() oder it.free() beendet das wieder.)
+it.switchTo(gegner, { speed: 150 });
+gegner.onTouch(async () => {
+  await speak("Erwischt! Von vorn.", { interrupt: true });
+  panto.loadLevel("Halle");
+});
+
+// alle Items des Levels: beim Einsammeln zählen
+for (const item of level.items()) {
+  item.onCollect(() => {
+    state.punkte++;
+    speak(\`\${state.punkte} von \${level.items().length}\`, { interrupt: true });
+    if (level.items().every((i) => !i.isVisible)) {
+      sound.success();
+      speak("Alles eingesammelt!");
+    }
+  });
+}
+
+// Entfernung zum Gegner als Ton – onFrame läuft in jedem Bild
+let letzterPiep = 0;
+panto.onFrame((dt, zeit) => {
+  const d = gegner.distanceTo(me);
+  if (d > 60 || zeit - letzterPiep < 0.35) return;
+  letzterPiep = zeit;
+  sound.beep(1200 - d * 10, 40, { volume: 0.12 });
+});
+`,
+          spawn: { me: { x: 150, y: 120 } },
+          objects: [
+            { id: oid(), type: 'wall', name: 'Kiste', points: rect(195, 100, 30, 24), closed: true },
+            { id: oid(), type: 'entity', kind: 'enemy', name: 'Wächter', shape: 'circle', x: 140, y: 80, r: 13, speak: '', sound: '', solid: false, handle: 'me' },
+            { id: oid(), type: 'entity', kind: 'item', name: 'Item 1', shape: 'circle', x: 160, y: 152, r: 11, speak: '', sound: '', solid: false, handle: 'me' },
+            { id: oid(), type: 'entity', kind: 'item', name: 'Item 2', shape: 'circle', x: 240, y: 145, r: 11, speak: '', sound: '', solid: false, handle: 'me' },
+            { id: oid(), type: 'entity', kind: 'item', name: 'Item 3', shape: 'circle', x: 265, y: 95, r: 11, speak: '', sound: '', solid: false, handle: 'me' },
+          ],
+        },
+      ],
+    }),
+  },
+  {
     key: 'empty',
     title: 'Leeres Projekt',
     description: 'Ein leeres Level und ein leeres Skript.',

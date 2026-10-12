@@ -3,6 +3,7 @@
 import { Emulator } from './panto/emulator.js';
 import { SerialDevice, DEVICE_PROFILES } from './panto/webserial.js';
 import { Runtime } from './panto/runtime.js';
+import { VoiceInput } from './panto/voice.js';
 import { TEMPLATES } from './editor/templates.js';
 import {
   createProject, normalize, loadAll, saveAll, getCurrentId, setCurrentId,
@@ -23,7 +24,7 @@ import { fitView, drawWorld } from './editor/renderer.js';
 import { API_DTS, API_HTML } from './editor/api-docs.js';
 
 /** Shown in the console at startup – makes it obvious when the browser serves an old copy. */
-export const BUILD = '2026-10-10 · Zoom im Level-Editor, Ordner-Projekte, Sounds';
+export const BUILD = '2026-10-12 · switchTo: ruhiges Folgen (ease/lead/smooth)';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const h = (tag, attrs = {}, ...children) => {
@@ -152,6 +153,9 @@ function openProject(project, { keepFolder = false } = {}) {
   setCurrentId(app.project.id);
   $('#project-name').value = app.project.name;
   $('#opt-boundary').checked = !!app.project.settings.boundary;
+  // Editor-Dokumente des alten Projekts wegwerfen: "main" heißt im neuen Projekt
+  // genauso, und ein übrig gebliebenes Dokument würde dessen Skript überschreiben.
+  app.code?.reset();
   openScript('main');
   app.view = 'script';
   app.subtab = 'level';
@@ -607,6 +611,29 @@ function snippetFor(obj) {
   if (obj.type === 'zone') {
     return `level.zone(${name}).onEnter(() => {\n  speak("Hier bist du richtig!");\n});`;
   }
+  if (obj.type === 'entity') {
+    if (obj.kind === 'item') {
+      return `level.entity(${name}).onCollect(() => {
+  state.punkte = (state.punkte ?? 0) + 1;
+  speak("Gesammelt: " + state.punkte);
+});`;
+    }
+    if (obj.kind === 'enemy') {
+      const x = Math.round(obj.x);
+      const y = Math.round(obj.y);
+      return `const gegner = level.entity(${name});
+// läuft hin und her; speed in mm/s
+gegner.patrol([[${x}, ${y}], [${Math.min(290, x + 60)}, ${y}]], { speed: 40 });
+gegner.onTouch(() => {
+  speak("Erwischt!");
+  panto.loadLevel(panto.level.name);   // von vorn
+});`;
+    }
+    return `const ziel = level.entity(${name});
+ziel.onTouch(() => speak("Gefunden!"));
+// ziel.follow(me, { speed: 30 });   // folgt dem Me-Griff
+// ziel.attachTo("it");              // It fährt dauernd dorthin`;
+  }
   return `const obj = level.object(${name});\nobj.disable(); // z. B. eine Tür öffnen`;
 }
 
@@ -678,8 +705,10 @@ function renderProps(obj) {
     return;
   }
 
-  const typeLabel = { wall: 'Wand', rail: 'Schiene', zone: 'Zone' }[obj.type];
-  const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'zone' ? 'z. B. Ziel' : 'optional, z. B. Tür' });
+  const typeLabel = obj.type === 'entity'
+    ? { enemy: 'Gegner', item: 'Item' }[obj.kind] ?? 'Objekt'
+    : { wall: 'Wand', rail: 'Schiene', zone: 'Zone' }[obj.type];
+  const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'wall' || obj.type === 'rail' ? 'optional, z. B. Tür' : 'z. B. Ziel' });
   let before = obj.name;
   nameIn.addEventListener('input', () => ed.update(obj, { name: nameIn.value }, { history: false }));
   nameIn.addEventListener('focus', () => {
@@ -692,10 +721,20 @@ function renderProps(obj) {
   });
   panel.append(h('h3', {}, typeLabel), field('Name', nameIn, 'Über den Namen findest du das Objekt im Skript.'));
 
-  const check = (label, key, hint) => {
-    const c = h('input', { type: 'checkbox', checked: key === 'enabled' ? obj[key] !== false : !!obj[key] });
+  const check = (label, key, hint, def = false) => {
+    const c = h('input', { type: 'checkbox', checked: obj[key] ?? def });
     c.addEventListener('change', () => ed.update(obj, { [key]: c.checked }));
     return h('label', { class: 'check', title: hint ?? '' }, c, label);
+  };
+  const range = (label, key, { min, max, step = 1, unit = ' mm', hint } = {}) => {
+    const r = h('input', { type: 'range', min, max, step, value: obj[key] });
+    const out = h('output', {}, `${obj[key]}${unit}`);
+    r.addEventListener('pointerdown', () => ed.snapshot());
+    r.addEventListener('input', () => {
+      out.textContent = `${r.value}${unit}`;
+      ed.update(obj, { [key]: +r.value }, { history: false });
+    });
+    return field(label, h('div', { class: 'range-row' }, r, out), hint);
   };
   const select = (label, key, options, def) => {
     const s = h('select', {}, options.map(([v, l]) => h('option', { value: v, selected: (obj[key] ?? def) === v }, l)));
@@ -707,7 +746,7 @@ function renderProps(obj) {
     panel.append(
       check('Geschlossene Form', 'closed'),
       check('Durchlässig (mit Kraft überwindbar)', 'passable'),
-      check('Beim Start aktiv', 'enabled'),
+      check('Beim Start aktiv', 'enabled', null, true),
       select('Gilt für', 'handles', [['both', 'Beide Griffe'], ['me', 'Nur Me'], ['it', 'Nur It']], 'both')
     );
   } else if (obj.type === 'rail') {
@@ -720,8 +759,35 @@ function renderProps(obj) {
     });
     panel.append(
       field('Stärke (Fangbreite)', h('div', { class: 'range-row' }, r, out), 'Wie weit man sich von der Schiene entfernen muss, um sie zu verlassen.'),
-      check('Beim Start aktiv', 'enabled'),
+      check('Beim Start aktiv', 'enabled', null, true),
       select('Gilt für', 'handles', [['both', 'Beide Griffe'], ['me', 'Nur Me'], ['it', 'Nur It']], 'both')
+    );
+  } else if (obj.type === 'entity') {
+    const kindSel = h('select', {}, [['enemy', 'Gegner'], ['item', 'Item'], ['marker', 'Markierung']]
+      .map(([v, l]) => h('option', { value: v, selected: (obj.kind ?? 'marker') === v }, l)));
+    kindSel.addEventListener('change', () => {
+      ed.update(obj, { kind: kindSel.value });
+      renderProps(obj); // andere Art, andere Optionen
+    });
+    const say = h('textarea', { rows: 2, placeholder: obj.kind === 'item' ? 'z. B. „Münze!“' : 'z. B. „Autsch!“' });
+    say.value = obj.speak ?? '';
+    say.addEventListener('focus', () => ed.snapshot());
+    say.addEventListener('input', () => ed.update(obj, { speak: say.value }, { history: false }));
+    const sounds = app.project.assets ?? [];
+    const sndSel = h('select', {}, [
+      h('option', { value: '', selected: !obj.sound }, '– kein Sound –'),
+      ...sounds.map((a) => h('option', { value: a.name, selected: obj.sound === a.name }, a.name)),
+    ]);
+    sndSel.addEventListener('change', () => ed.update(obj, { sound: sndSel.value }));
+    panel.append(
+      field('Art', kindSel, 'Gegner und Items werden angezeigt; im Skript bekommen sie ihr Verhalten.'),
+      range('Radius (Berührung)', 'r', { min: 4, max: 40, hint: 'So nah muss der Griff kommen, damit onTouch auslöst.' }),
+      field('Beim Berühren sagen', say),
+      field('Beim Berühren abspielen', sndSel, sounds.length ? null : 'Sounds lädst du links in der Seitenleiste hoch.'),
+      check('Fühlbar: runde Wand auf dem Gerät', 'solid', 'Ohne Haken ist das Objekt nur sichtbar und reagiert auf Berührung. Mit Haken legt die Runtime eine runde Wand an; bewegte Objekte werden nur beim Anhalten neu übertragen.'),
+      obj.kind === 'item' ? check('Verschwindet beim Einsammeln', 'vanish', null, true) : null,
+      select('Reagiert auf', 'handle', [['me', 'Me-Griff'], ['it', 'It-Griff'], ['both', 'Beide']], 'me'),
+      check('Beim Start sichtbar', 'enabled', null, true)
     );
   } else if (obj.type === 'zone') {
     const say = h('textarea', { rows: 2, placeholder: 'Optional, z. B. „Du bist am Ziel.“' });
@@ -731,7 +797,7 @@ function renderProps(obj) {
     panel.append(
       field('Beim Betreten sagen', say),
       select('Reagiert auf', 'handle', [['me', 'Me-Griff'], ['it', 'It-Griff'], ['both', 'Beide']], 'me'),
-      check('Beim Start aktiv', 'enabled')
+      check('Beim Start aktiv', 'enabled', null, true)
     );
   }
 
@@ -793,6 +859,53 @@ function selectTab(tab) {
   }
   $('#tab-console').hidden = tab !== 'console';
   $('#tab-api').hidden = tab !== 'api';
+}
+
+// ---------------------------------------------------------------------------
+// microphone (voice input)
+
+const VOICE_LABEL = { off: '🎤 aus', listening: '🎤 hört', paused: '🎤 Pause', error: '🎤 blockiert' };
+const VOICE_TITLE = {
+  off: 'Das Programm hört nicht zu. Klicken startet das Mikrofon.',
+  listening: 'Das Mikrofon ist an. Klicken schaltet es aus.',
+  paused: 'Kurze Pause (der Erkenner startet gleich wieder oder die App spricht gerade).',
+  error: 'Kein Zugriff auf das Mikrofon – im Browser links neben der Adresse erlauben.',
+};
+
+function renderVoice(info) {
+  const pill = $('#voice-status');
+  const v = app.runtime?.voice;
+  // sichtbar, sobald ein Projekt die Spracheingabe benutzt
+  const used = !!v && (v.state !== 'off' || v._commands?.size || v._text?.size || v._partial?.size);
+  pill.hidden = !used;
+  const state = v?.state ?? 'off';
+  pill.dataset.state = state;
+  pill.textContent = VOICE_LABEL[state] ?? VOICE_LABEL.off;
+  pill.title = VOICE_TITLE[state] ?? '';
+  if (info?.text && !info.partial) pill.title = `Zuletzt verstanden: „${info.text}“`;
+}
+
+function toggleVoice() {
+  const v = app.runtime?.voice;
+  if (!v) return;
+  if (v.isListening || v.state === 'paused') v.stop();
+  else v.start();
+  renderVoice();
+}
+
+/**
+ * Sagt in der Konsole, wie die Erkennung in diesem Browser arbeitet.
+ *
+ * Bewusst OHNE `SpeechRecognition.available()`: der Aufruf ist experimentell und bringt
+ * in einem Chromium ohne Spracherkennungs-Dienst den Renderer zum Absturz (weiße Seite,
+ * kein try/catch hilft). Wer es wissen will, ruft im Skript voice.localAvailable() auf.
+ */
+function reportVoiceSupport() {
+  if (!VoiceInput.supported) {
+    log('info', 'Spracheingabe: in diesem Browser nicht verfügbar (nur Chrome und Edge am Computer).');
+    return;
+  }
+  log('info', 'Spracheingabe: verfügbar. In Chrome läuft die Erkennung über einen Server – das Audio geht ins Netz, offline funktioniert sie nicht. voice.localAvailable() prüft, ob dieser Browser auch auf dem Gerät erkennen kann.');
 }
 
 // ---------------------------------------------------------------------------
@@ -882,9 +995,14 @@ async function run({ startLevel, project: override } = {}) {
     clearTimeout(captionTimer);
     captionTimer = setTimeout(() => (rt.caption = ''), Math.max(2500, text.length * 75));
   });
-  rt.on('stopped', () => updateRunUi());
+  rt.on('stopped', () => {
+    updateRunUi();
+    renderVoice();
+  });
+  rt.on('voice', (info) => renderVoice(info));
   const started = rt.start();
   updateRunUi();
+  renderVoice();
   $('#stage').focus();
   await started;
 }
@@ -1081,6 +1199,7 @@ async function init() {
   $('#btn-stop').addEventListener('click', stopRun);
   $('#btn-restart').addEventListener('click', () => run());
   $('#btn-connect').addEventListener('click', toggleDevice);
+  $('#voice-status').addEventListener('click', toggleVoice);
   $('#btn-selftest').addEventListener('click', () => {
     selectTab('console');
     log('info', 'Selbsttest: eine Wand wird angelegt. Danach den Me-Griff langsam darüber bewegen.');
@@ -1167,6 +1286,7 @@ async function init() {
       .catch(() => {});
   }
   log('info', `Willkommen im DualPanto Studio (${BUILD}).`);
+  reportVoiceSupport();
   console.info('DualPanto Studio', BUILD);
 
   // code editor (async, may load Monaco from a CDN)

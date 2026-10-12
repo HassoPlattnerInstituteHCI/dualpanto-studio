@@ -11,6 +11,8 @@ export const TOOLS = [
   { key: 'rail', label: 'Schiene', hint: 'Punkte setzen (Hallway). Doppelklick oder Enter beendet.', shortcut: 'R' },
   { key: 'zone', label: 'Zone', hint: 'Rechteck aufziehen: ein Bereich, der beim Betreten reagiert.', shortcut: 'Z' },
   { key: 'zoneCircle', label: 'Zone rund', hint: 'Vom Mittelpunkt aus aufziehen.', shortcut: 'K' },
+  { key: 'enemy', label: 'Gegner', hint: 'Klicken setzt einen Gegner. Er wird angezeigt und reagiert, wenn Me ihn berührt. Im Skript: level.entity("Name").', shortcut: 'G' },
+  { key: 'item', label: 'Item', hint: 'Klicken setzt ein Item zum Einsammeln. Es verschwindet beim Berühren.', shortcut: 'I' },
   { key: 'spawnMe', label: 'Start Me', hint: 'Klicken: hierhin fährt der Me-Griff beim Laden des Levels.', shortcut: '' },
   { key: 'spawnIt', label: 'Start It', hint: 'Klicken: hierhin fährt der It-Griff beim Laden des Levels.', shortcut: '' },
 ];
@@ -277,11 +279,13 @@ export class LevelEditor {
       const i = sel.points.findIndex((q) => dist(q, p) < tol * 1.2);
       if (i >= 0) return { obj: sel, vertex: i };
     }
-    if (sel?.type === 'zone' && sel.shape === 'circle' && Math.abs(dist(p, sel) - sel.r) < tol) return { obj: sel, radius: true };
+    if ((sel?.type === 'zone' || sel?.type === 'entity') && sel.shape === 'circle' && Math.abs(dist(p, sel) - sel.r) < tol) return { obj: sel, radius: true };
     if (sel?.type === 'zone' && sel.shape === 'rect') {
       const corner = { x: sel.x + sel.w, y: sel.y + sel.h };
       if (dist(p, corner) < tol * 1.2) return { obj: sel, corner: true };
     }
+    // entities sit on top of everything else
+    for (const o of objs) if (o.type === 'entity' && dist(o, p) <= Math.max(o.r ?? 10, tol)) return { obj: o };
     for (const o of objs) {
       if (o.type === 'wall' || o.type === 'rail') {
         for (const [a, b] of edges(o.points, o.closed)) if (distToSegment(p, a, b) < tol) return { obj: o };
@@ -345,6 +349,19 @@ export class LevelEditor {
     }
     if (t === 'box' || t === 'zone' || t === 'zoneCircle') {
       this.drag = { kind: 'create', tool: t, start: p, end: p };
+      return;
+    }
+    if (t === 'enemy' || t === 'item') {
+      this.snapshot();
+      const obj = {
+        id: uid('o'), type: 'entity', kind: t, shape: 'circle',
+        name: this._name(t === 'enemy' ? 'Gegner' : 'Item'),
+        x: p.x, y: p.y, r: t === 'enemy' ? 12 : 10,
+        speak: '', sound: '', solid: false, handle: 'me',
+      };
+      this.level.objects.push(obj);
+      this.select(obj.id);
+      this.changed();
       return;
     }
     if (t === 'spawnMe' || t === 'spawnIt') {
@@ -512,7 +529,7 @@ export class LevelEditor {
     drawWorld(this.ctx, this.view, scene, { selectedId: this.selectedId, showVertices: true });
     // rect/circle resize handles
     const s = this.selected;
-    if (s?.type === 'zone' && (s.shape === 'rect' || s.shape === 'circle')) {
+    if ((s?.type === 'zone' || s?.type === 'entity') && (s.shape === 'rect' || s.shape === 'circle')) {
       const p = s.shape === 'rect' ? { x: s.x + s.w, y: s.y + s.h } : { x: s.x + s.r, y: s.y };
       const q = this.view.toScreen(p);
       const ctx = this.ctx;

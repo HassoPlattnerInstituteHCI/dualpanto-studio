@@ -98,10 +98,16 @@ function monacoEditor(monaco, container, { onChange, typeDefs, dark }) {
     kind: 'monaco',
     open(key, value = '') {
       const m = modelFor(key, value);
-      if (value != null && m.getValue() !== value && key !== current) {
+      // Inhalt immer nachziehen, auch wenn dieses Dokument schon offen ist: beim
+      // Projektwechsel heißt das Haupt-Skript wieder "main", und früher blieb dann
+      // der Text des alten Projekts stehen (und wurde von syncScripts zurück-
+      // geschrieben, womit das neue Skript verloren war).
+      if (value != null && m.getValue() !== value) {
+        const pos = key === current ? editor.getPosition() : null;
         silent = true;
         m.setValue(value);
         silent = false;
+        if (pos) editor.setPosition(pos);
       }
       if (current === key) return;
       if (current) states.set(current, editor.saveViewState());
@@ -125,6 +131,13 @@ function monacoEditor(monaco, container, { onChange, typeDefs, dark }) {
       models.delete(key);
       states.delete(key);
       if (current === key) current = null;
+    },
+    /** Alles vergessen – beim Wechsel auf ein anderes Projekt. */
+    reset() {
+      for (const m of models.values()) m.dispose();
+      models.clear();
+      states.clear();
+      current = null;
     },
     setTheme: (d) => monaco.editor.setTheme(d ? 'vs-dark' : 'vs'),
     markError(key, line, message) {
@@ -193,6 +206,11 @@ function textareaEditor(container, { onChange }) {
     },
     forget(key) {
       values.delete(key);
+    },
+    reset() {
+      values.clear();
+      current = null;
+      ta.value = '';
     },
     setTheme: () => {},
     markError: () => {},

@@ -2,9 +2,11 @@
 // device (emulator or real hardware) and provides the API that scripts use.
 
 import { Emitter } from './emitter.js';
+import { VoiceInput, bestMatch, parseNumber, normalize as normalizeText } from './voice.js';
 import {
   toPoint, dist, rectPoints, circlePoints, shapeContains, shapeCenter,
   pointInPolygon, clampToPolygon, distToPolygonEdge, polygonCentroid,
+  norm, sub, lerp,
 } from './geometry.js';
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -52,6 +54,7 @@ class Handle {
     this._god = { x: 0, y: 0 };
     this._rot = 0;
     this._transition = null;
+    this._follow = null; // { target, speed, rotation, hz, last, sent } – switchTo
     this._moveListeners = new Set();
   }
   /** Position the user feels (god object), in mm. */
@@ -78,12 +81,14 @@ class Handle {
   get area() {
     return this._rt._area(this.index)?.map((q) => ({ ...q })) ?? null;
   }
-  /** true if the handle can physically reach p. */
+  /** true if the handle can physically reach p (Punkt, Objekt, Zone oder Funktion). */
   canReach(p) {
-    return this._rt._reachable(toPoint(p?.position ?? p), this.index);
+    const q = this._rt._targetPoint(p);
+    return q ? this._rt._reachable(q, this.index) : false;
   }
   distanceTo(p) {
-    return dist(this._god, toPoint(p?.position ?? p));
+    const q = this._rt._targetPoint(p);
+    return q ? dist(this._god, q) : NaN;
   }
   /** fn(position) is called whenever the handle moves. */
   onMove(fn) {
@@ -98,7 +103,8 @@ class Handle {
   moveTo(p, { speed = 120, duration, rotation = null, hold = this.index === 1 } = {}) {
     const rt = this._rt;
     rt._assertRunning();
-    const wanted = toPoint(p?.position ?? p);
+    const wanted = rt._targetPoint(p);
+    if (!wanted) throw new TypeError(`${this.name}.moveTo braucht einen Punkt oder ein Objekt mit Position.`);
     const target = rt._clamp(wanted, this.index);
     if (dist(wanted, target) > 1) rt._warnOnce(`reach:${this.name}`, `${this.name}.moveTo: (${Math.round(wanted.x)}, ${Math.round(wanted.y)}) liegt außerhalb des Bereichs von ${this.name === 'me' ? 'Me' : 'It'}. Der Griff fährt zum nächsten erreichbaren Punkt.`);
     const d = dist(this._pos, target);
@@ -120,13 +126,142 @@ class Handle {
       this._transition = t;
     });
   }
-  /** Gives control back to the user. */
+  /**
+   * Der Griff fährt zum Objekt und **bleibt dann an ihm**: bewegt sich das Objekt,
+   * fährt der Griff mit. Genau das macht `PantoHandle.SwitchTo` im Unity-Toolkit –
+   * dort wird die Zielposition in jedem Physik-Frame neu geschickt, hier `hz` mal
+   * pro Sekunde (und nur, wenn sich das Ziel wirklich bewegt hat).
+   *
+   * Ziel: ein Gegner/Item, eine Zone, der andere Griff, ein Punkt – oder eine
+   * Funktion, die einen Punkt liefert.
+   *
+   * Das Promise erfüllt sich, sobald der Griff zum ersten Mal angekommen ist;
+   * danach folgt er weiter, bis free(), freeze(), stopFollow() oder das nächste
+   * switchTo kommt.
+   */
+  switchTo(target, opts = {}) {
+    const { speed = 120, rotation = null, hz = 20, ease = 2.5, lead = 0.6, deadzone = 1 } = opts;
+    // Ein Griff als Ziel liefert Sensorwerte und zappelt – dann stärker glätten.
+    const smooth = opts.smooth ?? (target?.handlePosition ? 0.6 : 0.25);
+    const rt = this._rt;
+    rt._assertRunning();
+    if (target == null) throw new Error(`${this.name}.switchTo braucht ein Ziel (Objekt, Zone, Griff oder Punkt).`);
+    if (rt._targetPoint(target) == null) throw new TypeError(`${this.name}.switchTo: dieses Ziel hat keine Position.`);
+    this._follow = {
+      target, speed, rotation,
+      hz: Math.max(1, Math.min(60, hz)),
+      ease: Math.max(1, Math.min(10, ease)),
+      smooth: Math.max(0, Math.min(0.95, smooth)),
+      lead: Math.max(0, Math.min(2, lead)),
+      deadzone: Math.max(0, deadzone),
+      last: 0, sent: null, sm: null, v: null, prev: null, seen: 0,
+    };
+    return this.moveTo(target, { speed, rotation, hold: true });
+  }
+  /** Gleiche Wirkung wie switchTo – der Name, den man beim Lesen erwartet. */
+  follow(target, opts) {
+    return this.switchTo(target, opts);
+  }
+  /** Beendet nur das Folgen; der Griff bleibt, wo er ist. */
+  stopFollow() {
+    this._follow = null;
+    return this;
+  }
+  get isFollowing() {
+    return !!this._follow;
+  }
+  /** Punkt, dem der Griff gerade folgt (oder null). */
+  get followTarget() {
+    return this._follow ? this._rt._targetPoint(this._follow.target) : null;
+  }
+  /** Name des Objekts, dem gefolgt wird – für Anzeige und Protokoll. */
+  get followName() {
+    const t = this._follow?.target;
+    return t && typeof t === 'object' ? t.name || null : null;
+  }
+
+  /**
+   * Ein Streaming-Schritt. Während der ersten Fahrt wird nur nachgezielt, wenn das
+   * Ziel deutlich weggelaufen ist – sonst würde jedes Paket die Fahrt neu starten.
+   */
+  _tickFollow(now) {
+    const f = this._follow;
+    if (!f) return;
+    const rt = this._rt;
+    const raw = rt._targetPoint(f.target);
+    if (!raw) return;
+    if (f.target?.removed || f.target?.isVisible === false) {
+      this._follow = null;
+      return;
+    }
+
+    // Zielpunkt glätten (verrauschte Ziele: die Hand der Person, zappelnde Objekte).
+    // Ein echter Sprung wird nicht geglättet, sonst würde der Griff hinterherkriechen.
+    if (!f.sm || dist(f.sm, raw) > 30) {
+      f.sm = { ...raw };
+      f.v = null;
+    } else {
+      f.sm = { x: f.sm.x + (raw.x - f.sm.x) * (1 - f.smooth), y: f.sm.y + (raw.y - f.sm.y) * (1 - f.smooth) };
+    }
+
+    // Zielgeschwindigkeit für den Vorhalt – aus dem GEGLÄTTETEN Verlauf. Aus dem rohen
+    // gerechnet, speist sie das Rauschen wieder ein (±1,5 mm pro Bild sind ±90 mm/s).
+    const dt = f.seen ? (now - f.seen) / 1000 : 0;
+    if (f.prev && dt > 0.001 && dt < 0.5) {
+      const vx = (f.sm.x - f.prev.x) / dt;
+      const vy = (f.sm.y - f.prev.y) / dt;
+      f.v = f.v ? { x: f.v.x + (vx - f.v.x) * 0.3, y: f.v.y + (vy - f.v.y) * 0.3 } : { x: vx, y: vy };
+    }
+    f.prev = { ...f.sm };
+    f.seen = now;
+
+    const clamped = rt._clamp(raw, this.index);
+    if (dist(raw, clamped) > 1) {
+      rt._warnOnce(`follow:${this.name}`, `${this.name} folgt einem Ziel außerhalb des erreichbaren Bereichs – der Griff bleibt am nächsten erreichbaren Punkt.`);
+    }
+
+    const moving = !!this._transition;
+    if (now - f.last < (moving ? 250 : 1000 / f.hz)) return;
+
+    // Die Firmware fährt das God Object in `1 / SPEED` Sekunden zum Ziel.
+    //
+    // Ist diese Dauer genau ein Update-Intervall, ist jede Fahrt zu Ende, bevor das
+    // nächste Ziel kommt: der Griff fährt in kleinen Stößen und steht dazwischen –
+    // am Gerät fühlt sich das wie Vibrieren an (gemessen: 25 % Stillstand, ~43
+    // Beschleunigungswechsel/s). Deshalb dauert jede Fahrt `ease` Intervalle, die
+    // Fahrten überlappen sich also und die Geschwindigkeit bleibt gleichmäßig.
+    //
+    // Der Nachlauf, den das kostet (≈ ease · v / hz), wird durch einen Vorhalt
+    // ausgeglichen: gesendet wird, wo das Ziel am Ende der Fahrt sein wird.
+    const dur0 = Math.max(0.01, f.ease / f.hz);
+    const aim = { x: f.sm.x, y: f.sm.y };
+    if (f.lead > 0 && f.v) {
+      aim.x += f.v.x * dur0 * f.lead;
+      aim.y += f.v.y * dur0 * f.lead;
+    }
+    const target = rt._clamp(aim, this.index);
+    if (f.sent && dist(f.sent, target) < (moving ? 8 : f.deadzone)) return;
+    f.last = now;
+    f.sent = target;
+    const step = dist(this._pos, target);
+    const dur = Math.max(dur0, step / Math.max(1, f.speed)); // große Sprünge nicht mit Vollgas
+    if (!f.durSent || Math.abs(dur - f.durSent) / f.durSent > 0.2) {
+      rt.device.setSpeed(this.index, Math.min(100, 1 / dur));
+      f.durSent = dur;
+    }
+    const rot = f.rotation === true ? f.target?.rotation ?? null : typeof f.rotation === 'number' ? f.rotation : null;
+    rt.device.moveHandle(this.index, target, rot);
+  }
+
+  /** Gives control back to the user (beendet auch das Folgen). */
   free() {
+    this._follow = null;
     this._transition?.resolve(false);
     this._rt.device.free(this.index);
   }
-  /** Locks the handle at its current position. */
+  /** Locks the handle at its current position (beendet auch das Folgen). */
   freeze() {
+    this._follow = null;
     this._rt.device.freeze(this.index);
   }
   /** Force feedback: pushes in direction dir ({x,y}) with strength 0..1. */
@@ -215,6 +350,296 @@ class Zone extends WorldObject {
   }
 }
 
+/**
+ * An entity: an enemy, an item or a marker. Entities are *shown* (editor, live preview)
+ * and they react when a handle touches them – they do not need a body on the device.
+ * Opt in to haptics with `solid: true` (a round wall) or `attachTo("it")` (the It handle
+ * follows the entity).
+ */
+class Entity extends WorldObject {
+  constructor(rt, data) {
+    super(rt, data);
+    this._touch = new Set();
+    this._leave = new Set();
+    this._collect = new Set();
+    this._inside = new Map(); // handle index -> currently touching
+    this._move = null;        // { points, i, speed, loop, pingpong, dir, resolve }
+    this._follow = null;      // { target, speed, distance }
+    this._attached = null;    // Griff, der an diesem Objekt hängt (attachTo)
+    this._body = null;        // Obstacle, only when solid
+    this._bodyAt = null;
+  }
+
+  // ---- position ---------------------------------------------------------
+  get position() {
+    return { x: this.x, y: this.y };
+  }
+  set position(p) {
+    this.moveToNow(p);
+  }
+  get radius() {
+    return this.r;
+  }
+  set radius(v) {
+    this.r = Math.max(1, +v || 1);
+    this._syncBody(true);
+  }
+  /** Puts the entity somewhere immediately (no animation). */
+  moveToNow(p) {
+    const q = this._rt._clampWorld(toPoint(p?.position ?? p));
+    this.x = q.x;
+    this.y = q.y;
+    this._syncBody(true);
+    this._rt._changed();
+    return this;
+  }
+  distanceTo(p) {
+    return dist(this, toPoint(p?.position ?? p));
+  }
+  /** true while a handle is inside the touch radius. */
+  touching(handle = 'me') {
+    return !!this._inside.get(handle === 'it' ? 1 : 0);
+  }
+  get isMoving() {
+    return !!(this._move || this._follow);
+  }
+
+  // ---- movement ---------------------------------------------------------
+  /** Moves the entity to p (speed in mm/s). Resolves when it arrives. */
+  moveTo(p, { speed = 60, duration } = {}) {
+    return this._path([p], { speed, duration });
+  }
+  moveBy(dx, dy, opts) {
+    return this.moveTo({ x: this.x + dx, y: this.y + dy }, opts);
+  }
+  /** Walks the points over and over. pingpong: back and forth instead of jumping back. */
+  patrol(points, { speed = 45, loop = true, pingpong = true } = {}) {
+    if (!Array.isArray(points) || points.length < 1) throw new Error('patrol braucht eine Liste von Punkten.');
+    this._path(points, { speed, loop, pingpong });
+    return this;
+  }
+  /** Follows a handle, another entity or a point, keeping `distance` mm away. */
+  follow(target, { speed = 35, distance = 0 } = {}) {
+    this._endMove(false);
+    this._follow = { target, speed, distance };
+    return this;
+  }
+  /** Stops moving / following. */
+  halt() {
+    this._endMove(false);
+    this._follow = null;
+    return this;
+  }
+  _path(points, { speed = 60, duration, loop = false, pingpong = false } = {}) {
+    this._rt._assertRunning();
+    const pts = points.map((p) => toPoint(p?.position ?? p));
+    this._follow = null;
+    this._endMove(false);
+    let total = dist(this, pts[0]);
+    for (let i = 1; i < pts.length; i++) total += dist(pts[i - 1], pts[i]);
+    const sp = duration ? total / Math.max(0.05, duration) : speed;
+    let resolve;
+    const done = new Promise((r) => (resolve = r));
+    this._move = { points: pts, i: 0, speed: Math.max(1, sp), loop, pingpong, dir: 1, resolve };
+    return done;
+  }
+  _endMove(arrived) {
+    const m = this._move;
+    this._move = null;
+    m?.resolve?.(arrived);
+  }
+
+  /** One animation step. Returns true if the entity moved. */
+  _step(dt) {
+    if (this.removed) return false;
+    let moved = false;
+    if (this._follow) {
+      const f = this._follow;
+      const t = toPoint(f.target?.position ?? f.target);
+      const d = dist(this, t);
+      const goal = f.distance > 0 && d > 0.01 ? lerp(t, this, Math.min(1, f.distance / d)) : t;
+      if (dist(this, goal) > 0.3) moved = this._advance(goal, f.speed * dt) || true;
+    } else if (this._move) {
+      const m = this._move;
+      const target = m.points[m.i];
+      if (!target) {
+        this._endMove(true);
+      } else {
+        moved = true;
+        if (this._advance(target, m.speed * dt)) this._nextWaypoint(m);
+      }
+    }
+    if (moved) this._syncBody();
+    else if (this._bodyStale) this._syncBody(true);
+    return moved;
+  }
+
+  _nextWaypoint(m) {
+    if (m.pingpong && m.points.length > 1) {
+      if (m.i + m.dir >= m.points.length || m.i + m.dir < 0) {
+        if (!m.loop) return this._endMove(true);
+        m.dir *= -1;
+      }
+      m.i += m.dir;
+      return;
+    }
+    m.i++;
+    if (m.i < m.points.length) return;
+    if (m.loop) m.i = 0;
+    else this._endMove(true);
+  }
+
+  _advance(target, step) {
+    const d = dist(this, target);
+    if (d <= Math.max(step, 0.01)) {
+      const q = this._rt._clampWorld(target);
+      this.x = q.x;
+      this.y = q.y;
+      return true;
+    }
+    const dir = norm(sub(target, this));
+    const q = this._rt._clampWorld({ x: this.x + dir.x * step, y: this.y + dir.y * step });
+    this.x = q.x;
+    this.y = q.y;
+    return false;
+  }
+
+  // ---- the It handle as a stand-in for the entity ------------------------
+  /**
+   * Der Griff fährt zum Objekt und bleibt an ihm – wie `SwitchTo` im Unity-Toolkit.
+   * Kurzschreibweise für it.switchTo(entity).
+   */
+  attachTo(handle = 'it', opts = {}) {
+    const h = this._rt.handles[handle === 'me' ? 0 : 1];
+    this._attached = h ?? null;
+    h?.switchTo(this, { speed: 150, ...opts });
+    return this;
+  }
+  detach() {
+    this._attached?.free();
+    this._attached = null;
+    return this;
+  }
+
+  // ---- optional haptic body ---------------------------------------------
+  /** Gives the entity a round wall, so it can be felt. */
+  setSolid(on = true) {
+    this.solid = !!on;
+    this._syncBody(true);
+    return this;
+  }
+  _syncBody(force = false) {
+    const rt = this._rt;
+    if (!this.solid || this.removed || this.collected || this.enabled === false) {
+      if (this._body) {
+        this._body.remove();
+        this._body = null;
+        this._bodyAt = null;
+      }
+      this._bodyStale = false;
+      return;
+    }
+    // While it moves: the device cannot re-upload an obstacle every frame. On the
+    // emulator we refresh often, on hardware only when it has arrived.
+    const quick = rt.device.kind !== 'serial';
+    if (!force && this._bodyAt && dist(this._bodyAt, this) < (quick ? 2 : 4)) return;
+    if (!force && this.isMoving && !quick) {
+      this._bodyStale = true;
+      this._body?.disable();
+      return;
+    }
+    this._bodyStale = false;
+    this._body?.remove();
+    this._body = rt.createWall(circlePoints(this.x, this.y, this.r, 10), {
+      closed: true,
+      handles: this.handles ?? 'me',
+      name: `${this.name || 'Objekt'} (Körper)`,
+      body: true,
+    });
+    this._bodyAt = { x: this.x, y: this.y };
+  }
+
+  // ---- reactions --------------------------------------------------------
+  /** fn(handle, entity) when a handle touches the entity. */
+  onTouch(fn) {
+    const g = this._rt._guard(fn);
+    this._touch.add(g);
+    return this._rt._scope().add(() => this._touch.delete(g));
+  }
+  /** fn(handle, entity) when the handle leaves the entity again. */
+  onLeave(fn) {
+    const g = this._rt._guard(fn);
+    this._leave.add(g);
+    return this._rt._scope().add(() => this._leave.delete(g));
+  }
+  /** fn(handle, entity) when the entity is collected (items by default). */
+  onCollect(fn) {
+    const g = this._rt._guard(fn);
+    this._collect.add(g);
+    return this._rt._scope().add(() => this._collect.delete(g));
+  }
+
+  _fire(handle) {
+    const rt = this._rt;
+    if (this.speak) rt.speak(this.speak, { interrupt: true });
+    if (this.sound) rt.playSound(this.sound);
+    else if (this.kind === 'item') rt.beep(880, 90, { volume: 0.18 });
+    else if (this.kind === 'enemy') rt.beep(170, 200, { type: 'sawtooth', volume: 0.12 });
+    for (const fn of this._touch) fn(handle, this);
+    if (this.kind === 'item' && this.vanish !== false) this.collect(handle);
+  }
+
+  /** Marks the entity as collected: it disappears and stops reacting. */
+  collect(handle = this._rt.me) {
+    if (this.collected) return this;
+    this.collected = true;
+    this._inside.clear();
+    this.halt();
+    this._syncBody(true);
+    for (const fn of this._collect) fn(handle, this);
+    this._rt._changed();
+    return this;
+  }
+
+  /** Brings a collected/hidden entity back. */
+  reset(p) {
+    this.collected = false;
+    this.enabled = true;
+    this._inside.clear();
+    if (p) this.moveToNow(p);
+    else this._syncBody(true);
+    this._rt._changed();
+    return this;
+  }
+
+  show() {
+    return this.reset();
+  }
+  hide() {
+    this.enabled = false;
+    this._inside.clear();
+    this._syncBody(true);
+    this._rt._changed();
+    return this;
+  }
+  enable() {
+    return this.reset();
+  }
+  disable() {
+    return this.hide();
+  }
+  remove() {
+    this.halt();
+    this.detach();
+    this._body?.remove();
+    this._body = null;
+    this._dispose?.();
+  }
+  get isVisible() {
+    return this.enabled !== false && !this.collected;
+  }
+}
+
 class Level {
   constructor(rt, data) {
     this._rt = rt;
@@ -222,18 +647,47 @@ class Level {
     this.name = data.name;
     this.objects = [];
   }
-  /** Finds a zone of this level by its name. */
+  /**
+   * Alle Objekte der Szene: zuerst die dieses Levels, dann die aus dem Haupt-Skript.
+   * Deshalb findet level.entity("Gegner") auch ein Objekt, das das Haupt-Skript
+   * angelegt hat – der Unterschied interessiert beim Programmieren selten.
+   */
+  _scene(type) {
+    const out = type ? this.objects.filter((o) => o.type === type) : [...this.objects];
+    for (const o of this._rt.objects.values()) {
+      if (o.body || o.boundary || o.removed || out.includes(o)) continue;
+      if (!type || o.type === type) out.push(o);
+    }
+    return out;
+  }
+  /** Finds a zone of this level (or of the main script) by its name. */
   zone(name) {
-    const z = this.objects.find((o) => o.type === 'zone' && o.name === name);
-    if (!z) this._rt.log('warn', `Zone „${name}“ gibt es in Level „${this.name}“ nicht.`);
+    const z = this._scene('zone').find((o) => o.name === name);
+    if (!z) this._rt.log('warn', `Zone „${name}“ gibt es nicht – weder im Level „${this.name}“ noch im Haupt-Skript.`);
     return z ?? this._rt._dummyZone();
   }
-  /** Finds any object (wall, rail, zone) of this level by its name. */
+  /** Finds an entity (enemy, item, marker) by its name. */
+  entity(name) {
+    const e = this._scene('entity').find((o) => o.name === name);
+    if (!e) this._rt.log('warn', `Objekt „${name}“ gibt es nicht – weder im Level „${this.name}“ noch im Haupt-Skript.`);
+    return e ?? this._rt._dummyEntity();
+  }
+  /** Finds any object (wall, rail, zone, entity) by its name. */
   object(name) {
-    return this.objects.find((o) => o.name === name) ?? null;
+    return this._scene().find((o) => o.name === name) ?? null;
   }
   zones() {
-    return this.objects.filter((o) => o.type === 'zone');
+    return this._scene('zone');
+  }
+  /** All entities, optionally only one kind ("enemy", "item", "marker"). */
+  entities(kind) {
+    return this._scene('entity').filter((o) => !kind || o.kind === kind);
+  }
+  enemies() {
+    return this.entities('enemy');
+  }
+  items() {
+    return this.entities('item');
   }
   get spawn() {
     return this.data.spawn ?? {};
@@ -265,11 +719,16 @@ export class Runtime extends Emitter {
     this._levelHandlers = [];
     this._keyHandlers = new Set();
     this._stopHandlers = [];
+    this._frameHandlers = new Set();
+    this._codeLevels = new Map(); // levels defined in code via panto.defineLevel
+    this._time = 0;
     this._lineOffset = computeLineOffset();
     this._sources = new Map(); // sourceURL -> { id, label }
     this._unsub = [];
     this._audio = null;
     this.caption = '';
+    this.heard = '';
+    this.voice = new VoiceInput(this);
   }
 
   // ---- lifecycle --------------------------------------------------------
@@ -283,6 +742,7 @@ export class Runtime extends Emitter {
     );
     this._onKeyDown = (e) => this._handleKey(e);
     window.addEventListener('keydown', this._onKeyDown);
+    this._startTicker();
     this.log('info', `▶ Start (${d.kind === 'serial' ? 'DualPanto' : 'Emulator'})`);
     try {
       await this._setupBoundary();
@@ -316,10 +776,12 @@ export class Runtime extends Emitter {
       }
     }
     this.running = false;
+    this._stopTicker?.();
     this._levelScope?.dispose();
     this._globalScope.dispose();
     for (const id of [...this.objects.keys()]) this.objects.delete(id);
     for (const h of this.handles) {
+      h._follow = null;
       h._transition?.resolve(false);
       try {
         this.device.free(h.index);
@@ -332,13 +794,79 @@ export class Runtime extends Emitter {
     try {
       speechSynthesis.cancel();
     } catch {}
-    this._recognition?.stop?.();
+    this.voice.dispose();
     this._audio?.close?.();
     this.caption = '';
+    this.heard = '';
     this.level = null;
     this.log('info', '■ Gestoppt');
     this.emit('stopped');
     this._changed();
+  }
+
+  // ---- frame loop -------------------------------------------------------
+  /**
+   * Drives everything that moves on its own: entities, follow/patrol, onFrame
+   * callbacks and the touch test. Runs on requestAnimationFrame when available.
+   */
+  _startTicker() {
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(() => fn(now()), 16);
+    const cancel = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
+    this._t0 = now();
+    let last = this._t0;
+    let handle = null;
+    const step = () => {
+      if (!this.running) return;
+      const t = now();
+      const dt = Math.min(0.1, Math.max(0, (t - last) / 1000));
+      last = t;
+      this._time = (t - this._t0) / 1000;
+      try {
+        this._tick(dt, t);
+      } catch (e) {
+        this._reportError(e);
+      }
+      handle = raf(step);
+    };
+    handle = raf(step);
+    this._stopTicker = () => {
+      try {
+        cancel(handle);
+      } catch {}
+      this._stopTicker = null;
+    };
+  }
+
+  _tick(dt, now) {
+    let moved = false;
+    for (const o of [...this.objects.values()]) {
+      if (o.type === 'entity' && o._step(dt)) moved = true;
+    }
+    // Griffe, die an einem Objekt hängen, bekommen laufend die neue Zielposition
+    for (const h of this.handles) h._tickFollow(now);
+    this._checkTouch();
+    for (const fn of [...this._frameHandlers]) fn(dt, this._time);
+    if (moved) this.emit('frame');
+  }
+
+  /** Entities react when a handle comes inside their radius. */
+  _checkTouch() {
+    for (const o of this.objects.values()) {
+      if (o.type !== 'entity' || !o.isVisible) continue;
+      const which = o.handle === 'both' ? [0, 1] : o.handle === 'it' ? [1] : [0];
+      for (const i of which) {
+        const h = this.handles[i];
+        if (!h) continue;
+        const near = dist(h._god, o) <= (o.r ?? 8);
+        const was = !!o._inside.get(i);
+        if (near === was) continue;
+        o._inside.set(i, near);
+        if (h.isMoving) continue; // the program is driving the handle: no trigger
+        if (near) o._fire(h);
+        else for (const fn of o._leave) fn(h);
+      }
+    }
   }
 
   // ---- scripts ----------------------------------------------------------
@@ -419,6 +947,26 @@ export class Runtime extends Emitter {
     return { x: Math.max(0, Math.min(b.width, p.x)), y: Math.max(0, Math.min(b.height, p.y)) };
   }
 
+  /**
+   * Zielpunkt eines Objekts: Entity/Griff (position), Zone (center), Punkt, oder eine
+   * Funktion, die einen Punkt liefert. null, wenn daraus kein Punkt wird.
+   */
+  _targetPoint(t) {
+    try {
+      const v = typeof t === 'function' ? t() : t;
+      if (v == null) return null;
+      return toPoint(v.position ?? (v.type === 'zone' ? v.center : null) ?? v);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keeps a point on the working area (entities may stand anywhere on it). */
+  _clampWorld(p) {
+    const b = this.device.bounds;
+    return { x: Math.max(0, Math.min(b.width, p.x)), y: Math.max(0, Math.min(b.height, p.y)) };
+  }
+
   _warnOnce(key, text) {
     this._warned ??= new Set();
     if (this._warned.has(key)) return;
@@ -470,11 +1018,11 @@ export class Runtime extends Emitter {
     const it = this._area(1);
     if (!me) return;
     const outside = [];
-    const label = (o, i) => o.name || { wall: 'Wand', rail: 'Schiene', zone: 'Zone' }[o.type] + ` #${i + 1}`;
+    const label = (o, i) => o.name || { wall: 'Wand', rail: 'Schiene', zone: 'Zone', entity: 'Objekt' }[o.type] + ` #${i + 1}`;
     (data.objects ?? []).forEach((o, i) => {
-      const handle = o.type === 'zone' ? o.handle ?? 'me' : o.handles ?? 'both';
+      const handle = o.type === 'zone' || o.type === 'entity' ? o.handle ?? 'me' : o.handles ?? 'both';
       const area = handle === 'it' ? it : me;
-      const pts = o.points ?? [shapeCenter(o)];
+      const pts = o.type === 'entity' ? [{ x: o.x, y: o.y }] : o.points ?? [shapeCenter(o)];
       // walls may stick out over the edge (that closes gaps); everything else must be reachable
       const bad = o.type === 'wall' ? pts.every((q) => !pointInPolygon(q, area)) : pts.some((q) => !pointInPolygon(q, area));
       if (bad) outside.push(label(o, i));
@@ -528,10 +1076,18 @@ export class Runtime extends Emitter {
   // ---- world objects ----------------------------------------------------
   _register(obj, persistent) {
     this.objects.set(obj.id, obj);
+    // objects a level script creates belong to that level, so level.entity("…"),
+    // level.zones() and level.items() find them just like the drawn ones
+    const level = !persistent && !obj.body ? this.level : null;
+    if (level && !level.objects.includes(obj)) level.objects.push(obj);
     const dispose = () => {
       obj.removed = true;
       if (obj.deviceIds) for (const id of obj.deviceIds) this.device.removeObstacle(id, obj.handles);
       this.objects.delete(obj.id);
+      if (level) {
+        const i = level.objects.indexOf(obj);
+        if (i >= 0) level.objects.splice(i, 1);
+      }
       this._changed();
     };
     obj._dispose = this._scope(persistent).add(dispose);
@@ -539,14 +1095,14 @@ export class Runtime extends Emitter {
     return obj;
   }
 
-  createWall(points, { closed = false, passable = false, handles = 'both', name = '', enabled = true, persistent = false, boundary = false } = {}) {
+  createWall(points, { closed = false, passable = false, handles = 'both', name = '', enabled = true, persistent = false, boundary = false, body = false } = {}) {
     this._assertRunning();
     const pts = points.map(toPoint);
     if (pts.length < 2) throw new Error('Eine Wand braucht mindestens 2 Punkte.');
     const devId = this._allocDeviceId();
     const upload = () => this.device.createObstacle(devId, pts, { closed, passable, handles });
     upload();
-    const obj = new Obstacle(this, { id: devId, type: 'wall', name, points: pts, closed, passable, handles, enabled: false, deviceIds: [devId], boundary, _upload: upload });
+    const obj = new Obstacle(this, { id: devId, type: 'wall', name, points: pts, closed, passable, handles, enabled: false, deviceIds: [devId], boundary, body, _upload: upload });
     this._register(obj, persistent);
     if (enabled) obj.enable();
     return obj;
@@ -581,9 +1137,58 @@ export class Runtime extends Emitter {
     return this._register(obj, persistent);
   }
 
+  /**
+   * An entity: shown in the editor and the preview, reacts on touch. By default it has
+   * no body on the device – `solid: true` adds a round wall, `attachTo("it")` sends the
+   * It handle to it.
+   */
+  createEntity(opts = {}) {
+    this._assertRunning();
+    const {
+      x = 0, y = 0, r = 10, kind = 'marker', name = '', speak = '', sound = '',
+      solid = false, vanish, handle = 'me', handles = 'me', enabled = true, persistent = false, ...rest
+    } = opts;
+    const p = this._clampWorld({ x: +x, y: +y });
+    const obj = new Entity(this, {
+      ...rest,
+      id: `e${this._nextId++}`, type: 'entity', shape: 'circle', kind, name,
+      x: p.x, y: p.y, r: Math.max(1, +r || 1), speak, sound, solid, vanish, handle, handles,
+      enabled, collected: false,
+    });
+    this._register(obj, persistent);
+    if (solid) obj._syncBody(true);
+    return obj;
+  }
+
+  _dummyEntity() {
+    const e = new Entity(this, { id: 'e0', type: 'entity', shape: 'circle', kind: 'marker', name: '', x: -1e6, y: -1e6, r: 1, enabled: false, handle: 'me' });
+    e.removed = true;
+    return e;
+  }
+
+  entities(kind) {
+    return this.sceneObjects('entity').filter((o) => !kind || o.kind === kind);
+  }
+
+  /** Alle Objekte der Szene (ohne die Hilfs-Wände von solid-Entities und den Rand). */
+  sceneObjects(type) {
+    return [...this.objects.values()].filter((o) => !o.body && !o.boundary && !o.removed && (!type || o.type === type));
+  }
+
+  /** Objekt der Szene über seinen Namen (Level zuerst, dann Haupt-Skript). */
+  find(name) {
+    return this.level?.object(name) ?? this.sceneObjects().find((o) => o.name === name) ?? null;
+  }
+
   _instantiate(o) {
     const common = { name: o.name ?? '', enabled: o.enabled !== false };
     switch (o.type) {
+      case 'entity':
+        return this.createEntity({
+          ...o, ...common,
+          kind: o.kind ?? 'marker', x: o.x, y: o.y, r: o.r ?? 10,
+          speak: o.speak ?? '', sound: o.sound ?? '', solid: !!o.solid, handle: o.handle ?? 'me',
+        });
       case 'wall':
         return this.createWall(o.points, { ...common, closed: !!o.closed, passable: !!o.passable, handles: o.handles ?? 'both' });
       case 'rail':
@@ -598,7 +1203,9 @@ export class Runtime extends Emitter {
   // ---- levels -----------------------------------------------------------
   async loadLevel(name) {
     this._assertRunning();
-    const data = this.project.levels?.find((l) => l.name === name);
+    const code = this._codeLevels.get(name);
+    const data = this.project.levels?.find((l) => l.name === name) ??
+      (code ? { id: code.id, name, intro: code.intro ?? '', spawn: code.spawn ?? {}, objects: [], script: '' } : null);
     if (!data) {
       this.log('error', `Level „${name}“ gibt es nicht. Vorhanden: ${this.levelNames().join(', ') || '–'}`);
       return null;
@@ -608,13 +1215,20 @@ export class Runtime extends Emitter {
     const level = new Level(this, data);
     this.level = level;
     this._checkLevelReach(data);
-    for (const o of data.objects ?? []) {
-      const obj = this._instantiate(o);
-      if (obj) level.objects.push(obj);
-    }
+    for (const o of data.objects ?? []) this._instantiate(o); // _register adds them to level.objects
     this.log('info', `Level „${name}“ geladen`);
     this.emit('level', level);
     this._changed();
+
+    // a level built in code (panto.defineLevel): run its builder in the level scope
+    if (code) {
+      try {
+        const r = code.build(level);
+        if (r && typeof r.catch === 'function') r.catch((e) => this._reportError(e));
+      } catch (e) {
+        this._reportError(e);
+      }
+    }
 
     // the level's own script: everything it creates belongs to this level
     const levelFn = this._compile(data.script, { id: `level-${data.id}`, label: `Level „${name}“`, levelId: data.id }, { level });
@@ -639,7 +1253,9 @@ export class Runtime extends Emitter {
   }
 
   levelNames() {
-    return (this.project.levels ?? []).map((l) => l.name);
+    const names = (this.project.levels ?? []).map((l) => l.name);
+    for (const n of this._codeLevels.keys()) if (!names.includes(n)) names.push(n);
+    return names;
   }
 
   // ---- speech & sound ---------------------------------------------------
@@ -648,7 +1264,20 @@ export class Runtime extends Emitter {
     this.caption = text;
     this.emit('speech', text);
     this.log('speech', text);
-    if (!this.running || typeof speechSynthesis === 'undefined') return Promise.resolve();
+    // Für den Echo-Schutz der Spracheingabe: was wird gerade gesagt, und seit wann?
+    this._lastSpoken = text;
+    this._spokeAt = Date.now();
+    const seq = (this._speakSeq = (this._speakSeq ?? 0) + 1);
+    const spoken = () => {
+      if (seq !== this._speakSeq) return;
+      this._speaking = false;
+      this._spokeAt = Date.now();
+    };
+    if (!this.running || typeof speechSynthesis === 'undefined') {
+      spoken();
+      return Promise.resolve();
+    }
+    this._speaking = true;
     if (interrupt) speechSynthesis.cancel();
     return new Promise((resolve) => {
       const u = new SpeechSynthesisUtterance(text);
@@ -657,6 +1286,7 @@ export class Runtime extends Emitter {
       u.pitch = pitch;
       const done = () => {
         clearTimeout(timer);
+        spoken();
         resolve();
       };
       u.onend = done;
@@ -811,6 +1441,16 @@ export class Runtime extends Emitter {
       circle: (x, y, r, opts = {}) => rt.createWall(circlePoints(x, y, r, opts.corners ?? 16), { closed: true, ...opts }),
       rail: (points, opts) => rt.createRail(points, opts),
       zone: (shape, opts) => rt.createZone(shape, opts),
+      /** Sichtbares Objekt (Gegner, Item, Markierung). panto.entity(x, y, {…}) */
+      entity: (a, b, c) => rt.createEntity(entityArgs(a, b, c)),
+      enemy: (a, b, c) => rt.createEntity({ kind: 'enemy', r: 12, ...entityArgs(a, b, c) }),
+      item: (a, b, c) => rt.createEntity({ kind: 'item', r: 10, ...entityArgs(a, b, c) }),
+      /** Alle Entities der Szene, optional nach Art gefiltert. */
+      entities: (kind) => rt.entities(kind),
+      /** Objekt der Szene über seinen Namen – geht auch im Haupt-Skript, ohne `level`. */
+      find: (name) => rt.find(name),
+      /** Alle Objekte der Szene, optional nach Typ ("wall", "rail", "zone", "entity"). */
+      objects: (type) => rt.sceneObjects(type),
       loadLevel: (name) => rt.loadLevel(name),
       nextLevel: () => {
         const names = rt.levelNames();
@@ -822,6 +1462,23 @@ export class Runtime extends Emitter {
       onLevel: (name, fn) => {
         if (typeof name === 'function') [name, fn] = [null, name];
         rt._levelHandlers.push({ name, fn: rt._guard(fn) });
+      },
+      /** Ein Level komplett im Code: panto.defineLevel("Arena", (level) => { … }) */
+      defineLevel: (name, build, { spawn, intro } = {}) => {
+        if (typeof name !== 'string' || !name.trim()) throw new Error('defineLevel braucht einen Namen.');
+        if (typeof build !== 'function') throw new Error('defineLevel braucht eine Funktion, die das Level aufbaut.');
+        rt._codeLevels.set(name, { id: `code-${name.replace(/\W+/g, '-').toLowerCase()}`, name, build: rt._guard(build), spawn, intro });
+        return name;
+      },
+      /** fn(dt, zeit) läuft in jedem Bild – für eigene Spiellogik. dt in Sekunden. */
+      onFrame: (fn, { persistent = false } = {}) => {
+        const g = rt._guard(fn);
+        rt._frameHandlers.add(g);
+        return rt._scope(persistent).add(() => rt._frameHandlers.delete(g));
+      },
+      /** Sekunden seit dem Start. */
+      get time() {
+        return rt._time;
       },
       onStop: (fn) => {
         rt._stopHandlers.push(fn);
@@ -900,38 +1557,30 @@ export class Runtime extends Emitter {
       },
     };
 
-    const listen = (commands, fn) => {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR) {
-        rt.log('warn', 'Spracherkennung wird von diesem Browser nicht unterstützt.');
-        return () => {};
-      }
-      const rec = new SR();
-      rec.lang = rt.project.settings?.lang ?? 'de-DE';
-      rec.continuous = true;
-      rec.interimResults = false;
-      const g = rt._guard(fn);
-      rec.onresult = (ev) => {
-        const text = ev.results[ev.results.length - 1][0].transcript.trim().toLowerCase();
-        rt.log('info', `🎤 „${text}“`);
-        const match = commands?.length ? commands.find((c) => text.includes(String(c).toLowerCase())) : text;
-        if (match) g(match, text);
-      };
-      rec.onend = () => rt.running && active && rec.start();
-      let active = true;
-      rec.start();
-      rt._recognition = rec;
-      return rt._scope().add(() => {
-        active = false;
-        rec.stop();
+    /** Einfache Variante: listen(["start", "stopp"], fn) oder listen(null, fn) für alles. */
+    const listen = (commands, fn) =>
+      rt.voice.onText((text, raw, alts) => {
+        if (!commands?.length) return fn(text, raw);
+        for (const alt of [raw, ...(alts ?? [])]) {
+          const hit = bestMatch(alt, commands);
+          if (hit) return fn(hit.option, raw);
+        }
       });
-    };
 
     const ui = {
       menu: (items, opts) => createMenu(rt, { speak, sound, onKey }, items, opts),
+      /** Texteingabe über die Tastatur. Für blinde Nutzer ist voice.ask() besser. */
       prompt: async (question, def = '') => {
         await rt.speak(question, { interrupt: true });
         return window.prompt(question, def);
+      },
+      /** Fragt per Sprache, fällt ohne Mikrofon auf die Tastatur zurück. */
+      askVoice: async (question, opts) => {
+        if (VoiceInput.supported) {
+          const a = await rt.voice.ask(question, opts);
+          if (a != null) return a;
+        }
+        return ui.prompt(question);
       },
     };
 
@@ -948,11 +1597,16 @@ export class Runtime extends Emitter {
       }
       return polygonCentroid(areas[0]);
     };
-    const distance = (a, b) => dist(toPoint(a?.position ?? a), toPoint(b?.position ?? b));
+    const distance = (a, b) => {
+      const p = rt._targetPoint(a);
+      const q = rt._targetPoint(b);
+      return p && q ? dist(p, q) : NaN;
+    };
 
     return {
       panto, me: rt.me, it: rt.it, speak, sound, after, every, wait, onKey, listen, ui, storage,
       state: rt.state, log, random, randomPoint, distance,
+      voice: rt.voice, parseNumber, matchText: bestMatch, normalizeText,
     };
   }
 }
@@ -1014,13 +1668,26 @@ function createMenu(rt, { speak, sound, onKey }, items, opts = {}) {
   keys = [onKey('Enter', () => menu.select()), onKey('Space', () => menu.select())];
   if (title) speak(title, { interrupt: true });
   if (moveHandle && items.length) rt.me.moveTo({ x, y }).then(() => {
+    // Hat die Person (oder ein Sprachbefehl) in der Zwischenzeit schon etwas
+    // ausgewählt, nicht dazwischenreden und die Auswahl nicht zurücksetzen.
+    if (!rt.running || menu.focused >= 0) return;
     menu.focused = 0;
-    if (rt.running) speak(label(menu.items[0]) + (announceIndex ? `, 1 von ${menu.items.length}` : ''));
+    speak(label(menu.items[0]) + (announceIndex ? `, 1 von ${menu.items.length}` : ''));
   });
   return menu;
 }
 
 // ---------------------------------------------------------------------------
+
+/** Accepts panto.entity({…}), panto.entity(x, y, {…}) and panto.entity([x, y], {…}). */
+function entityArgs(a, b, c) {
+  if (typeof a === 'number') {
+    const opts = c ?? (b && typeof b === 'object' ? b : {});
+    return { ...opts, x: a, y: typeof b === 'number' ? b : opts.y ?? 0 };
+  }
+  if (Array.isArray(a)) return { ...(b ?? {}), x: +a[0], y: +a[1] };
+  return { ...(a ?? {}), ...(b ?? {}) };
+}
 
 function fmt(v) {
   if (typeof v === 'string') return v;

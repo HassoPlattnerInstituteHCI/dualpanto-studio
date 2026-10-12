@@ -32,7 +32,8 @@ export class Emulator extends Emitter {
       god: startOf(i),
       rot: 0,
       pointer: null, // where the user drags this handle
-      tween: null, // {from, to, t, duration}
+      tween: null, // {from, to, t, duration, v0}
+      vel: { x: 0, y: 0 }, // mm/s, aus dem letzten Tick
       held: false, // position controlled by the program
       target: null,
       speed: 1, // firmware semantics: 1/duration in seconds
@@ -110,7 +111,10 @@ export class Emulator extends Emitter {
     const to = this._clamp(pos, index);
     // firmware semantics: speed = 1 / duration of the transition in seconds
     const duration = 1 / Math.max(0.01, h.speed);
-    h.tween = { from: { ...h.pos }, to, t: 0, duration };
+    // Die Anfangsgeschwindigkeit wird mitgenommen: ein neues Ziel während der Fahrt
+    // lässt die Mechanik weiterlaufen, sie fängt nicht wieder bei Null an. Ohne das
+    // pulsiert ein laufend aktualisiertes Ziel (switchTo) mit der Update-Rate.
+    h.tween = { from: { ...h.pos }, to, t: 0, duration, v0: h.tween ? { ...h.vel } : { x: 0, y: 0 } };
     h.target = to;
     h.held = true;
   }
@@ -148,13 +152,22 @@ export class Emulator extends Emitter {
 
   _tick(dt) {
     for (const h of this.handles) {
+      const before = { ...h.pos };
       if (h.tween) {
-        h.tween.t += dt / h.tween.duration;
-        const t = Math.min(1, h.tween.t);
-        const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOut
-        h.pos = lerp(h.tween.from, h.tween.to, e);
+        const tw = h.tween;
+        tw.t += dt / tw.duration;
+        const t = Math.min(1, tw.t);
+        // Hermite: startet mit der vorhandenen Geschwindigkeit v0 und endet in Ruhe.
+        // Mit v0 = 0 ist das dieselbe weiche Kurve wie vorher (einzelnes moveTo).
+        const h00 = 2 * t ** 3 - 3 * t ** 2 + 1;
+        const h10 = t ** 3 - 2 * t ** 2 + t;
+        const h01 = -2 * t ** 3 + 3 * t ** 2;
+        h.pos = {
+          x: tw.from.x * h00 + tw.v0.x * tw.duration * h10 + tw.to.x * h01,
+          y: tw.from.y * h00 + tw.v0.y * tw.duration * h10 + tw.to.y * h01,
+        };
         if (t >= 1) {
-          h.pos = { ...h.tween.to };
+          h.pos = { ...tw.to };
           h.tween = null;
           this.emit('transitionEnded', h.index);
         }
@@ -167,6 +180,8 @@ export class Emulator extends Emitter {
         if (h.pointer) h.pos = { ...h.pointer };
         h.god = this._moveGod(h.index, h.god, h.pos);
       }
+      // Momentangeschwindigkeit mitführen (für die Anfangsgeschwindigkeit der nächsten Fahrt)
+      h.vel = dt > 0 ? { x: (h.pos.x - before.x) / dt, y: (h.pos.y - before.y) / dt } : { x: 0, y: 0 };
     }
     this.emit(
       'position',

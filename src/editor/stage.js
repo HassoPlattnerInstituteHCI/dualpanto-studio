@@ -30,6 +30,14 @@ export class Stage {
     });
   }
 
+  /** Zeigt an, wenn ein Griff gerade an einem Objekt hängt (switchTo/follow). */
+  _withFollow(rt) {
+    return this.handles.map((h, i) => {
+      const handle = rt?.handles?.[i];
+      return handle?.isFollowing ? { ...h, followTo: handle.followTarget, followName: handle.followName } : h;
+    });
+  }
+
   _world(e) {
     const r = this.canvas.getBoundingClientRect();
     return this.view.toWorld({ x: e.clientX - r.left, y: e.clientY - r.top });
@@ -69,7 +77,7 @@ export class Stage {
     const rt = this.getRuntime();
     let scene;
     if (rt?.running) {
-      scene = { objects: [...rt.objects.values()], handles: this.handles, caption: rt.caption, areas: device?.profile?.areas };
+      scene = { objects: [...rt.objects.values()], handles: this._withFollow(rt), caption: rt.caption, heard: rt.heard, areas: device?.profile?.areas };
     } else {
       const level = this.getPreviewLevel();
       scene = { objects: level?.objects ?? [], spawn: level?.spawn, handles: this.handles, areas: device?.profile?.areas };

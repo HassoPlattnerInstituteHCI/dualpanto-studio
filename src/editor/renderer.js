@@ -17,6 +17,8 @@ export function palette() {
     passable: cssVar('--c-passable', '#8a8a8a'),
     rail: cssVar('--c-rail', '#1f7a6d'),
     zone: cssVar('--c-zone', '#3a6fd8'),
+    enemy: cssVar('--c-enemy', '#d23f3f'),
+    item: cssVar('--c-item', '#2f9e44'),
     me: cssVar('--c-me', '#e8710a'),
     it: cssVar('--c-it', '#7b4fd0'),
     text: cssVar('--fg', '#1d1d1f'),
@@ -108,6 +110,7 @@ export function drawWorld(ctx, view, scene, opts = {}) {
   for (const o of objects) if (o.type === 'zone') drawZone(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'rail') drawRail(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'wall') drawWall(ctx, o, c, px, opts);
+  for (const o of objects) if (o.type === 'entity') drawEntity(ctx, o, c, px, opts);
 
   // spawn markers (level editor)
   if (scene.spawn) {
@@ -146,6 +149,19 @@ export function drawWorld(ctx, view, scene, opts = {}) {
   }
   ctx.restore();
 
+  // what the microphone heard
+  if (scene.heard) {
+    const t = scene.heard.length > 70 ? scene.heard.slice(0, 68) + '…' : scene.heard;
+    ctx.font = '500 12px system-ui, sans-serif';
+    const w = ctx.measureText(t).width + 38;
+    ctx.fillStyle = hexA(c.me, 0.92);
+    roundRect(ctx, 10, 10, Math.min(view.w - 20, w), 24, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🎤 ' + t, 22, 22, view.w - 44);
+  }
+
   // caption (speech output)
   if (scene.caption) {
     const text = scene.caption.length > 90 ? scene.caption.slice(0, 88) + '…' : scene.caption;
@@ -164,8 +180,51 @@ export function drawWorld(ctx, view, scene, opts = {}) {
   ctx.restore();
 }
 
+/** Enemies, items and markers: shown, optionally felt (solid). */
+function drawEntity(ctx, o, c, px, opts) {
+  const selected = opts.selectedId != null && opts.selectedId === o.id;
+  const color = o.kind === 'enemy' ? c.enemy : o.kind === 'item' ? c.item : c.muted;
+  const gone = o.collected || o.enabled === false;
+  const r = Math.max(2, o.r ?? 10);
+  ctx.globalAlpha = gone ? 0.22 : 1;
+  // touch radius
+  ctx.beginPath();
+  ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = hexA(color, 0.13);
+  ctx.fill();
+  ctx.setLineDash(o.solid ? [] : [px(3), px(3)]);
+  ctx.strokeStyle = hexA(color, o.solid ? 0.9 : 0.5);
+  ctx.lineWidth = px(o.solid ? 2 : 1);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // body: triangle = enemy, diamond = item, dot = marker
+  const b = Math.max(px(4), r * 0.55);
+  ctx.beginPath();
+  if (o.kind === 'enemy') {
+    ctx.moveTo(o.x, o.y - b);
+    ctx.lineTo(o.x + b * 0.92, o.y + b * 0.7);
+    ctx.lineTo(o.x - b * 0.92, o.y + b * 0.7);
+    ctx.closePath();
+  } else if (o.kind === 'item') {
+    ctx.moveTo(o.x, o.y - b);
+    ctx.lineTo(o.x + b, o.y);
+    ctx.lineTo(o.x, o.y + b);
+    ctx.lineTo(o.x - b, o.y);
+    ctx.closePath();
+  } else {
+    ctx.arc(o.x, o.y, b * 0.75, 0, Math.PI * 2);
+  }
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = selected ? c.select : '#fff';
+  ctx.lineWidth = px(selected ? 2.5 : 1.4);
+  ctx.stroke();
+  if (o.name && opts.labels !== false) label(ctx, o.name, o.x, o.y + r + px(11), color, px);
+  ctx.globalAlpha = 1;
+}
+
 function drawWall(ctx, o, c, px, opts) {
-  if (o.boundary) return; // drawn as working area outline
+  if (o.boundary || o.body) return; // boundary: area outline, body: drawn with its entity
   const selected = opts.selectedId != null && opts.selectedId === o.id;
   ctx.globalAlpha = o.enabled === false ? 0.3 : 1;
   ctx.strokeStyle = selected ? c.select : o.passable ? c.passable : c.wall;
@@ -239,6 +298,21 @@ function drawZone(ctx, o, c, px, opts) {
 }
 
 function drawHandle(ctx, h, color, px) {
+  // Verbindung zum Objekt, an dem der Griff hängt (switchTo/follow)
+  if (h.followTo) {
+    ctx.strokeStyle = hexA(color, 0.75);
+    ctx.setLineDash([px(2), px(4)]);
+    ctx.lineWidth = px(1.5);
+    ctx.beginPath();
+    ctx.moveTo(h.god.x, h.god.y);
+    ctx.lineTo(h.followTo.x, h.followTo.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(h.followTo.x, h.followTo.y, px(3), 0, Math.PI * 2);
+    ctx.fillStyle = hexA(color, 0.75);
+    ctx.fill();
+  }
   // physical handle (ghost) if it differs from the god object
   const dx = h.pos.x - h.god.x;
   const dy = h.pos.y - h.god.y;

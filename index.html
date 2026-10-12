@@ -7,6 +7,43 @@
   <meta name="description" content="Online-Editor für DualPanto-Apps und -Spiele: Level zeichnen, JavaScript schreiben, im Emulator oder auf dem Gerät testen." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e8710a'/%3E%3Ccircle cx='12' cy='18' r='5' fill='white'/%3E%3Ccircle cx='21' cy='12' r='4' fill='white' opacity='.7'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Startfehler sichtbar machen. Ein Syntaxfehler in einem Modul bricht sonst still ab:
+    // das HTML steht da, aber nichts funktioniert, und ohne offene Konsole sieht man nicht warum.
+    (function () {
+      var gezeigt = false;
+      function zeigen(titel, text, quelle) {
+        if (gezeigt) return;
+        gezeigt = true;
+        var box = document.createElement('div');
+        box.id = 'boot-error';
+        box.innerHTML =
+          '<button type="button" aria-label="Meldung schließen">✕</button>' +
+          '<strong>' + titel + '</strong>' +
+          '<p>' + String(text).replace(/[<&]/g, ' ') + '</p>' +
+          (quelle ? '<p class="boot-src">' + String(quelle).replace(/[<&]/g, ' ') + '</p>' : '') +
+          '<p class="boot-hint">Tipp: mit <code>python3 serve.py</code> starten (liefert ohne Cache aus) und mit ' +
+          '<kbd>Umschalt</kbd>+Neu laden einmal hart neu laden. Details stehen in der Browser-Konsole.</p>';
+        box.querySelector('button').onclick = function () {
+          box.remove();
+        };
+        (document.body || document.documentElement).appendChild(box);
+      }
+      window.addEventListener('error', function (e) {
+        // Nur echte Skriptfehler. Ein fehlgeschlagener Download (CDN, Bild, Sound) hat
+        // keine message und ein Element als target – damit läuft das Studio weiter.
+        if (!e.message || (e.target && e.target !== window && e.target.tagName)) return;
+        var q = e.filename ? e.filename.replace(location.origin, '') + (e.lineno ? ':' + e.lineno : '') : '';
+        zeigen('Das Studio konnte nicht starten.', e.message, q);
+      }, true);
+      // Falls gar kein Fehler ankommt, aber die App trotzdem nicht hochkommt:
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          if (!window.__studio) zeigen('Das Studio ist nicht gestartet.', 'Die Module wurden geladen, aber die App hat sich nicht angemeldet.', '');
+        }, 8000);
+      });
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -27,6 +64,7 @@
     <div class="spacer"></div>
     <div class="device">
       <span id="device-status" class="pill" data-state="emulator">Emulator</span>
+      <button id="voice-status" class="pill pill-voice" data-state="off" hidden title="Mikrofon an- oder ausschalten">🎤 aus</button>
       <label class="check small" title="Gerät beim Verbinden neu starten (empfohlen)"><input id="opt-reset" type="checkbox" checked /> Reset</label>
       <label class="check small" title="Rand des Me-Bereichs beim Start als Wand anlegen (viele Pakete – zum Testen aus lassen)"><input id="opt-boundary" type="checkbox" /> Rand</label>
       <button id="btn-connect" class="btn btn-secondary">Gerät verbinden</button>
