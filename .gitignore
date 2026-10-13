@@ -1,13 +1,13 @@
-# lokale Monaco-Kopie für den Offline-Betrieb (wird bei Bedarf selbst angelegt)
+# local Monaco copy for offline use (created manually if needed)
 vendor/
 
-# Betriebssystem und Editor
+# operating system and editor
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 
-# Node (erst relevant, wenn ein Build dazukommt)
+# Node (only relevant once a build step is added)
 node_modules/
 dist/
 *.log

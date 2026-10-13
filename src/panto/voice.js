@@ -1,22 +1,22 @@
-// Spracheingabe (Web Speech API).
+// Voice input (Web Speech API).
 //
-// Zwei Dinge machen Spracheingabe am DualPanto besonders:
+// Two things make voice input on the DualPanto special:
 //
-// 1. Das Programm spricht selbst. Das Mikrofon hört die eigene Sprachausgabe mit und
-//    erkennt sie als Eingabe. Deshalb verwirft `_isEcho()` Ergebnisse, die während oder
-//    kurz nach der eigenen Ausgabe kommen und dem zuletzt Gesagten ähnlich sind.
-// 2. Die Erkennung läuft in Chrome standardmäßig über einen Google-Server (Audio geht
-//    ins Netz, offline geht nichts). `processLocally = true` erzwingt Erkennung auf dem
-//    Gerät, wenn der Browser sie kann – `VoiceInput.deviceAvailable()` prüft das.
+// 1. The program speaks itself. The microphone hears the speech output and recognises
+//    it as input. That is why `_isEcho()` drops results that arrive during or shortly
+//    after our own output and resemble what was said last.
+// 2. In Chrome, recognition runs on a Google server by default (audio goes over the
+//    network, nothing works offline). `processLocally = true` forces on-device
+//    recognition if the browser supports it – `VoiceInput.deviceAvailable()` checks that.
 //
-// Interpretiert wird nicht mit einem Sprachmodell, sondern mit Mustern: Platzhalter,
-// Alternativen, deutsche Zahlwörter und ein toleranter Vergleich gegen Erkennungsfehler.
+// Interpretation uses patterns rather than a language model: placeholders, alternatives,
+// number words (English and German) and a tolerant comparison against recognition errors.
 
 import { Emitter } from './emitter.js';
 
 const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
 
-/** Kleinschreibung, keine Satzzeichen, einfache Leerzeichen. */
+/** Lower case, no punctuation, single spaces. */
 export function normalize(text) {
   return String(text ?? '')
     .toLowerCase()
@@ -25,18 +25,34 @@ export function normalize(text) {
     .trim();
 }
 
-const ONES = { null: 0, eins: 1, ein: 1, eine: 1, einen: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9 };
-const TEENS = { zehn: 10, elf: 11, zwölf: 12, dreizehn: 13, vierzehn: 14, fünfzehn: 15, sechzehn: 16, siebzehn: 17, achtzehn: 18, neunzehn: 19 };
-const TENS = { zwanzig: 20, dreißig: 30, dreissig: 30, vierzig: 40, fünfzig: 50, sechzig: 60, siebzig: 70, achtzig: 80, neunzig: 90 };
+// English and German number words, so projects in either language understand numbers.
+const ONES = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  null: 0, eins: 1, ein: 1, eine: 1, einen: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9,
+};
+const TEENS = {
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  zehn: 10, elf: 11, zwölf: 12, dreizehn: 13, vierzehn: 14, fünfzehn: 15, sechzehn: 16, siebzehn: 17, achtzehn: 18, neunzehn: 19,
+};
+const TENS = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  zwanzig: 20, dreißig: 30, dreissig: 30, vierzig: 40, fünfzig: 50, sechzig: 60, siebzig: 70, achtzig: 80, neunzig: 90,
+};
+const HUNDRED = new Set(['hundred', 'hundert']);
 
-/** „dreiundzwanzig“, „fünf“, „-12“, „3,5“ → Zahl. null, wenn nichts Zählbares drinsteht. */
+/** "twenty-three", "two hundred five", "dreiundzwanzig", "-12", "3,5" → number. null if there is nothing countable. */
 export function parseNumber(text) {
   const t = normalize(text).replace(/,(\d)/g, '.$1');
   const digits = t.match(/-?\d+(\.\d+)?/);
   if (digits) return parseFloat(digits[0]);
   const neg = /\bminus\b/.test(t);
   let total = null;
-  for (const word of t.split(' ')) {
+  for (const word of t.split(/[ -]/)) {
+    // "two hundred": hundred multiplies what came before
+    if (HUNDRED.has(word)) {
+      total = (total || 1) * 100;
+      continue;
+    }
     const n = wordToNumber(word);
     if (n == null) continue;
     total = (total ?? 0) + n;
@@ -49,22 +65,22 @@ function wordToNumber(word) {
   if (word in TEENS) return TEENS[word];
   if (word in TENS) return TENS[word];
   if (word in ONES) return ONES[word];
-  if (word === 'hundert') return 100;
-  // „einundzwanzig“, „fünfundvierzig“ (\w kennt keine Umlaute)
+  if (HUNDRED.has(word)) return 100;
+  // German compounds: "einundzwanzig", "fünfundvierzig" (\w does not know umlauts)
   const m = /^([a-zäöüß]+?)und([a-zäöüß]+)$/.exec(word);
   if (m && m[1] in ONES && m[2] in TENS) return ONES[m[1]] + TENS[m[2]];
-  // „zweihundert“, „dreihundertfünfzig“
+  // "zweihundert", "dreihundertfünfzig"
   const h = /^([a-zäöüß]+?)hundert([a-zäöüß]*)$/.exec(word);
   if (h && h[1] in ONES) return ONES[h[1]] * 100 + (h[2] ? wordToNumber(h[2]) ?? 0 : 0);
   return null;
 }
 
-/** Umlaute vereinheitlichen, damit „grün“ und „gruen“ gleich zählen. */
+/** Unify umlauts so that "grün" and "gruen" count as equal. */
 export function fold(text) {
   return normalize(text).replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
 }
 
-/** 0..1, 1 = gleich. Für Toleranz gegen Erkennungsfehler („ziel“ / „ziehl“). */
+/** 0..1, 1 = equal. For tolerance against recognition errors ("goal" / "gole"). */
 export function similarity(a, b) {
   a = fold(a);
   b = fold(b);
@@ -81,7 +97,7 @@ export function similarity(a, b) {
   return 1 - d[a.length][b.length] / Math.max(a.length, b.length);
 }
 
-/** Gleicher Wortstamm: „startet“ passt zu „start“, „stoppuhr“ aber nicht zu „stopp“. */
+/** Same word stem: "starting" matches "start", but "stopwatch" does not match "stop". */
 function stemScore(a, b) {
   const [x, y] = [fold(a), fold(b)];
   if (x.length < 3 || y.length < 3) return 0;
@@ -89,7 +105,7 @@ function stemScore(a, b) {
   return 0.1 + 0.9 * (Math.min(x.length, y.length) / Math.max(x.length, y.length));
 }
 
-/** Findet in einer Liste den Eintrag, der am besten zum Text passt (oder null). */
+/** Finds the entry in a list that best matches the text (or null). */
 export function bestMatch(text, options, minScore = 0.72) {
   const t = fold(text);
   const words = t.split(' ');
@@ -97,7 +113,7 @@ export function bestMatch(text, options, minScore = 0.72) {
   for (const option of options) {
     const label = fold(typeof option === 'string' ? option : option?.label ?? option);
     if (!label) continue;
-    // ganzes Wort im Satz enthalten zählt voll
+    // a whole word contained in the sentence counts fully
     const contained = new RegExp(`(^| )${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).test(t);
     const score = contained
       ? 1
@@ -110,20 +126,20 @@ export function bestMatch(text, options, minScore = 0.72) {
 const RE_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
 /**
- * Baut aus einem Muster eine Regex.
- *   "gehe zu {ziel}"          → Platzhalter, landet in args.ziel
- *   "setze punkte {n:zahl}"   → args.n ist eine Zahl
- *   "(start|starte) spiel"    → Alternativen
- *   "*"                       → alles
- * Ohne Platzhalter reicht es, wenn die Wörter im Satz vorkommen (Erkenner hängt gern
- * Füllwörter an).
+ * Builds a regex from a pattern.
+ *   "go to {target}"          → placeholder, ends up in args.target
+ *   "set score {n:number}"    → args.n is a number ("zahl" works too)
+ *   "(start|begin) game"      → alternatives
+ *   "*"                       → anything
+ * Without placeholders it is enough for the words to occur in the sentence (the
+ * recogniser likes to add filler words).
  */
 export function compilePattern(pattern, { folded = false } = {}) {
   const prep = (s) => (folded ? fold(s) : normalize(s));
   if (pattern === '*') return { re: /^(.*)$/, slots: [{ name: 'text', type: 'text' }], raw: pattern, fallback: true };
   const slots = [];
   const parts = String(pattern).split(/(\{[^}]*\}|\([^)]*\))/).filter(Boolean);
-  // Steht am Ende ein Platzhalter, nimmt er den Rest des Satzes („gehe zu der Tür“).
+  // A placeholder at the end takes the rest of the sentence ("go to the door").
   const lastIsSlot = /\}\s*$/.test(String(pattern));
   let src = '';
   parts.forEach((part, i) => {
@@ -137,13 +153,13 @@ export function compilePattern(pattern, { folded = false } = {}) {
     } else if (part.startsWith('(') && part.endsWith(')')) {
       src += '(?:' + part.slice(1, -1).split('|').map((x) => prep(x).replace(RE_SPECIAL, '\\$&')).join('|') + ')';
     } else {
-      // normalize() schneidet Leerzeichen ab – an den Rändern müssen sie bleiben,
-      // sonst klebt "(start|starte) spiel" zu "startespiel" zusammen.
+      // normalize() trims spaces – at the edges they have to stay, otherwise
+      // "(start|begin) game" sticks together as "begingame".
       const pad = (/^\s/.test(part) ? ' ' : '') + prep(part) + (/\s$/.test(part) ? ' ' : '');
       src += pad.replace(RE_SPECIAL, '\\$&').replace(/ /g, '\\s+');
     }
   });
-  // Füllwörter davor erlauben; ohne Platzhalter am Ende darf auch dahinter etwas stehen
+  // allow filler words before; without a placeholder at the end, words may also follow
   const tail = lastIsSlot ? '\\s*$' : '(?=\\s|$)';
   return { re: new RegExp(`(?:^|\\s)${src}${tail}`), slots, raw: pattern };
 }
@@ -156,13 +172,13 @@ function slotValue(raw, type) {
 // ---------------------------------------------------------------------------
 
 export class VoiceInput extends Emitter {
-  /** @param {object} rt Runtime – für speak(), log() und den Echo-Schutz */
+  /** @param {object} rt runtime – for speak(), log() and echo protection */
   constructor(rt) {
     super();
     this.rt = rt;
     this.state = 'off'; // off | listening | paused | error
     this.lastText = '';
-    this.manual = false; // true bei Push-to-talk: nicht automatisch neu starten
+    this.manual = false; // true with push-to-talk: don't restart automatically
     this._rec = null;
     this._commands = new Set();
     this._text = new Set();
@@ -172,7 +188,7 @@ export class VoiceInput extends Emitter {
     this._restarts = 0;
     this._askResolve = null;
     this._opts = { lang: null, continuous: true, interim: true, local: false, minScore: 0.72 };
-    /** So lange nach der eigenen Sprachausgabe gilt ein ähnlicher Satz als Echo (ms). */
+    /** How long after our own speech output a similar sentence counts as echo (ms). */
     this.echoWindow = 1500;
   }
 
@@ -180,37 +196,36 @@ export class VoiceInput extends Emitter {
     return !!SR;
   }
 
-  /** true, wenn dieser Browser Spracheingabe kann (Chrome, Edge). */
+  /** true if this browser supports voice input (Chrome, Edge). */
   get supported() {
     return !!SR;
   }
 
   /** "available" | "downloadable" | "downloading" | "unavailable" | "unknown" */
   localAvailable(lang) {
-    return VoiceInput.deviceAvailable(lang ?? this._opts.lang ?? this.rt?.project?.settings?.lang ?? 'de-DE');
+    return VoiceInput.deviceAvailable(lang ?? this._opts.lang ?? this.rt?.project?.settings?.lang ?? 'en-US');
   }
 
-  /** Lädt das Sprachpaket, danach läuft die Erkennung ohne Server. Braucht einmal Internet. */
+  /** Downloads the language pack; afterwards recognition runs without a server. Needs internet once. */
   async installLocal(lang) {
-    const l = lang ?? this._opts.lang ?? this.rt?.project?.settings?.lang ?? 'de-DE';
-    this.rt?.log('info', `Sprachpaket für „${l}“ wird geladen …`);
+    const l = lang ?? this._opts.lang ?? this.rt?.project?.settings?.lang ?? 'en-US';
+    this.rt?.log('info', `Downloading language pack for "${l}" …`);
     const ok = await VoiceInput.installDevice(l);
     this.rt?.log(ok ? 'info' : 'warn', ok
-      ? 'Sprachpaket geladen. voice.start({ local: true }) erkennt jetzt auf dem Gerät.'
-      : 'Erkennung auf dem Gerät ist in diesem Browser nicht möglich.');
+      ? 'Language pack loaded. voice.start({ local: true }) now recognises on the device.'
+      : 'On-device recognition is not possible in this browser.');
     return ok;
   }
 
   /**
-   * Kann der Browser auf dem Gerät erkennen (ohne Server)?
+   * Can the browser recognise on the device (without a server)?
    *
-   * ACHTUNG: `SpeechRecognition.available()` ist noch experimentell. In einem Chromium
-   * ohne Spracherkennungs-Dienst (z. B. headless) bringt der Aufruf den Renderer zum
-   * Absturz – und so einen Absturz fängt kein try/catch auf. Deshalb wird diese Prüfung
-   * NIE automatisch beim Start ausgeführt, sondern nur, wenn ein Skript sie ausdrücklich
-   * aufruft.
+   * CAUTION: `SpeechRecognition.available()` is still experimental. In a Chromium without
+   * a speech recognition service (e.g. headless) the call crashes the renderer – and no
+   * try/catch catches that kind of crash. That is why this check NEVER runs automatically
+   * on start, only when a script calls it explicitly.
    */
-  static async deviceAvailable(lang = 'de-DE') {
+  static async deviceAvailable(lang = 'en-US') {
     if (!SR || typeof SR.available !== 'function') return 'unknown';
     try {
       return await SR.available({ langs: [lang], processLocally: true });
@@ -219,8 +234,8 @@ export class VoiceInput extends Emitter {
     }
   }
 
-  /** Lädt das Sprachpaket für die Erkennung auf dem Gerät (einmalig, braucht Internet). */
-  static async installDevice(lang = 'de-DE') {
+  /** Downloads the language pack for on-device recognition (once, needs internet). */
+  static async installDevice(lang = 'en-US') {
     if (!SR || typeof SR.install !== 'function') return false;
     try {
       return await SR.install({ langs: [lang], processLocally: true });
@@ -229,7 +244,7 @@ export class VoiceInput extends Emitter {
     }
   }
 
-  // ---- Technik ----------------------------------------------------------
+  // ---- internals ---------------------------------------------------------
   _setState(state, detail) {
     if (this.state === state && !detail) return;
     this.state = state;
@@ -240,7 +255,7 @@ export class VoiceInput extends Emitter {
   _create() {
     const o = this._opts;
     const rec = new SR();
-    rec.lang = o.lang ?? this.rt?.project?.settings?.lang ?? 'de-DE';
+    rec.lang = o.lang ?? this.rt?.project?.settings?.lang ?? 'en-US';
     rec.continuous = !this.manual && o.continuous !== false;
     rec.interimResults = o.interim !== false;
     rec.maxAlternatives = 3;
@@ -260,10 +275,10 @@ export class VoiceInput extends Emitter {
     return rec;
   }
 
-  /** Startet die Erkennung. Beim ersten Mal fragt der Browser nach dem Mikrofon. */
+  /** Starts recognition. The first time, the browser asks for the microphone. */
   start(options = {}) {
     if (!SR) {
-      this.rt?.log('warn', 'Spracheingabe gibt es nur in Chrome oder Edge am Computer.');
+      this.rt?.log('warn', 'Voice input is only available in Chrome or Edge on desktop.');
       this._setState('error', 'unsupported');
       return this;
     }
@@ -276,7 +291,7 @@ export class VoiceInput extends Emitter {
       this._rec.start();
     } catch (e) {
       this._starting = false;
-      if (!/already started/i.test(e.message)) this.rt?.log('warn', 'Mikrofon lässt sich nicht starten: ' + e.message);
+      if (!/already started/i.test(e.message)) this.rt?.log('warn', 'Cannot start the microphone: ' + e.message);
     }
     return this;
   }
@@ -291,7 +306,7 @@ export class VoiceInput extends Emitter {
     return this;
   }
 
-  /** Hört kurz nicht zu (z. B. während die App spricht), merkt sich aber den Wunsch. */
+  /** Stops listening for a moment (e.g. while the app speaks) but remembers that it should listen. */
   pause() {
     if (!this._want) return this;
     try {
@@ -313,8 +328,8 @@ export class VoiceInput extends Emitter {
   _onEnd() {
     this._starting = false;
     if (!this._want || this.manual) return this._setState(this.state === 'error' ? 'error' : 'off');
-    // Chrome beendet die Erkennung nach einer Pause von selbst: wieder anwerfen,
-    // mit Bremse, damit ein dauerhafter Fehler keine Endlosschleife wird.
+    // Chrome ends recognition by itself after a pause: start it again, with a
+    // back-off so a persistent error does not become an endless loop.
     this._restarts++;
     const delay = Math.min(2000, 120 * this._restarts);
     this._setState('paused');
@@ -328,13 +343,13 @@ export class VoiceInput extends Emitter {
     const code = ev?.error ?? 'unknown';
     if (code === 'no-speech' || code === 'aborted') return; // normal
     const texts = {
-      'not-allowed': 'Kein Zugriff auf das Mikrofon. Im Browser links neben der Adresse erlauben und neu starten.',
-      'service-not-allowed': 'Die Spracherkennung ist im Browser gesperrt.',
-      network: 'Die Spracherkennung braucht in Chrome eine Internetverbindung (das Audio wird zum Server geschickt).',
-      'audio-capture': 'Kein Mikrofon gefunden.',
-      'language-not-supported': 'Diese Sprache kann der Erkenner nicht.',
+      'not-allowed': 'No access to the microphone. Allow it in the browser (left of the address bar) and restart.',
+      'service-not-allowed': 'Speech recognition is blocked in the browser.',
+      network: 'Speech recognition in Chrome needs an internet connection (the audio is sent to a server).',
+      'audio-capture': 'No microphone found.',
+      'language-not-supported': 'The recogniser does not support this language.',
     };
-    this.rt?.log('warn', texts[code] ?? `Spracherkennung: Fehler „${code}“.`);
+    this.rt?.log('warn', texts[code] ?? `Speech recognition: error "${code}".`);
     if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
       this._want = false;
       this._setState('error', code);
@@ -342,10 +357,10 @@ export class VoiceInput extends Emitter {
   }
 
   /**
-   * Verwirft die eigene Sprachausgabe, die das Mikrofon mithört. Der Erkenner liefert
-   * ein Ergebnis erst eine knappe Sekunde nach dem Ton, deshalb gilt das Fenster noch
-   * `echoWindow` ms nach dem Sprechen – verworfen wird aber nur, was dem zuletzt
-   * Gesagten ähnlich ist. Eine echte Antwort darf direkt danach kommen.
+   * Drops our own speech output that the microphone picks up. The recogniser delivers a
+   * result almost a second after the sound, so the window lasts `echoWindow` ms after
+   * speaking – but only what resembles the last spoken text is dropped. A real answer
+   * may come right afterwards.
    */
   _isEcho(text) {
     const rt = this.rt;
@@ -371,13 +386,13 @@ export class VoiceInput extends Emitter {
       return;
     }
     if (this._isEcho(text)) {
-      this.rt?.log('device', `[Mikrofon] eigene Ausgabe verworfen: „${text}“`);
+      this.rt?.log('device', `[Microphone] dropped own output: "${text}"`);
       return;
     }
     this.lastText = text;
-    this.rt?.log('info', `🎤 „${text}“`);
+    this.rt?.log('info', `🎤 "${text}"`);
     this.rt?.emit?.('voice', { state: this.state, text });
-    // ask() hat Vorrang: es wartet gerade auf genau eine Antwort
+    // ask() takes precedence: it is waiting for exactly one answer
     if (this._askResolve) {
       const done = this._askResolve;
       this._askResolve = null;
@@ -389,9 +404,8 @@ export class VoiceInput extends Emitter {
   }
 
   /**
-   * Probiert alle Erkennungs-Alternativen gegen alle Muster: erst normal, dann mit
-   * vereinheitlichten Umlauten. "*" ist ein Auffangmuster und kommt nur dran, wenn
-   * kein echtes Muster gepasst hat.
+   * Tries all recognition alternatives against all patterns: first as is, then with
+   * unified umlauts. "*" is a catch-all pattern and only runs if no real pattern matched.
    */
   _dispatch(alts) {
     const commands = [...this._commands];
@@ -417,14 +431,14 @@ export class VoiceInput extends Emitter {
       for (const cmd of fallbacks) cmd.fn({ text: normalize(alts[0]) }, alts[0], cmd.raw);
       return true;
     }
-    if (specific.length) this.rt?.log('device', `[Mikrofon] kein Befehl passt zu „${alts[0]}“`);
+    if (specific.length) this.rt?.log('device', `[Microphone] no command matches "${alts[0]}"`);
     return false;
   }
 
-  // ---- API für Skripte --------------------------------------------------
+  // ---- API for scripts -------------------------------------------------
   /**
-   * voice.command("gehe zu {ziel}", ({ ziel }) => …)
-   * Platzhalter {name} und {name:zahl}, Alternativen (a|b), "*" für alles.
+   * voice.command("go to {target}", ({ target }) => …)
+   * Placeholders {name} and {name:number}, alternatives (a|b), "*" for anything.
    */
   command(pattern, fn, { persistent = false } = {}) {
     const { re, slots, raw, fallback } = compilePattern(pattern);
@@ -435,13 +449,13 @@ export class VoiceInput extends Emitter {
     return this.rt._scope(persistent).add(() => this._commands.delete(entry));
   }
 
-  /** Mehrere Befehle auf einmal: voice.commands({ "start": fn, "stopp": fn }) */
+  /** Several commands at once: voice.commands({ "start": fn, "stop": fn }) */
   commands(map, opts) {
     const offs = Object.entries(map).map(([p, fn]) => this.command(p, fn, opts));
     return () => offs.forEach((off) => off());
   }
 
-  /** Jeder erkannte Satz, ohne Muster. fn(normalisiert, original, alternativen) */
+  /** Every recognised sentence, without patterns. fn(normalized, original, alternatives) */
   onText(fn, { persistent = false } = {}) {
     const g = this.rt._guard(fn);
     this._text.add(g);
@@ -449,7 +463,7 @@ export class VoiceInput extends Emitter {
     return this.rt._scope(persistent).add(() => this._text.delete(g));
   }
 
-  /** Zwischenergebnisse, noch während gesprochen wird – gut für schnelle Reaktion. */
+  /** Interim results while the person is still speaking – good for quick reactions. */
   onPartial(fn, { persistent = false } = {}) {
     const g = this.rt._guard(fn);
     this._partial.add(g);
@@ -458,18 +472,18 @@ export class VoiceInput extends Emitter {
   }
 
   _autoStart() {
-    this.rt?.emit?.('voice', { state: this.state }); // Oberfläche: Mikrofon-Anzeige einblenden
+    this.rt?.emit?.('voice', { state: this.state }); // UI: show the microphone indicator
     if (this.manual || this._want || this.state === 'error') return;
     this.start();
   }
 
   /**
-   * Taste halten = zuhören („Push-to-talk“). Verhindert, dass die eigene
-   * Sprachausgabe oder Hintergrundgeräusche Befehle auslösen.
+   * Hold a key = listen ("push-to-talk"). Prevents our own speech output or
+   * background noise from triggering commands.
    */
   pushToTalk(key = 'v', { persistent = false } = {}) {
     this.manual = true;
-    this._rec = null; // continuous neu setzen
+    this._rec = null; // reset continuous
     const want = (e) => {
       const k = e.key === ' ' ? 'Space' : e.key;
       return k.toLowerCase() === String(key).toLowerCase() || e.code === key;
@@ -487,7 +501,7 @@ export class VoiceInput extends Emitter {
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
-    this.rt.log('info', `Push-to-talk: Taste „${key}“ halten und sprechen.`);
+    this.rt.log('info', `Push-to-talk: hold "${key}" and speak.`);
     this.rt.emit?.('voice', { state: this.state });
     return this.rt._scope(persistent).add(() => {
       window.removeEventListener('keydown', down);
@@ -497,22 +511,22 @@ export class VoiceInput extends Emitter {
   }
 
   /**
-   * Stellt eine Frage und wartet auf die Antwort.
-   * expect: "text" | "zahl" | ["ja", "nein"] (dann wird der beste Treffer zurückgegeben)
-   * Gibt null zurück, wenn nichts verstanden wurde.
+   * Asks a question and waits for the answer.
+   * expect: "text" | "number" | ["yes", "no"] (then the best match is returned)
+   * Returns null if nothing was understood.
    */
   async ask(question, { expect = 'text', timeout = 8000, retries = 1, lang } = {}) {
     if (!SR) {
-      this.rt.log('warn', 'Spracheingabe gibt es nur in Chrome oder Edge am Computer.');
+      this.rt.log('warn', 'Voice input is only available in Chrome or Edge on desktop.');
       return null;
     }
     const wasListening = this._want;
     const wasManual = this.manual;
     for (let round = 0; round <= retries; round++) {
-      if (question) await this.rt.speak(round === 0 ? question : 'Ich habe nichts verstanden. ' + question, { interrupt: true });
+      if (question) await this.rt.speak(round === 0 ? question : "I didn't catch that. " + question, { interrupt: true });
       if (!this.rt.running) return null;
-      await new Promise((r) => setTimeout(r, 250)); // Lautsprecher ausklingen lassen
-      this.manual = true; // kein Auto-Restart während der Frage
+      await new Promise((r) => setTimeout(r, 250)); // let the speaker fade out
+      this.manual = true; // no auto-restart during the question
       this._rec = null;
       this._want = true;
       this.start({ lang, continuous: false });
@@ -554,16 +568,16 @@ export class VoiceInput extends Emitter {
     return null;
   }
 
-  /** Ja/Nein-Frage. Gibt true, false oder null zurück. */
+  /** Yes/no question. Returns true, false or null. */
   async confirm(question, { timeout = 8000, retries = 1 } = {}) {
-    const yes = ['ja', 'jawohl', 'okay', 'ok', 'klar', 'stimmt'];
-    const no = ['nein', 'nicht', 'ne', 'nope', 'abbrechen'];
+    const yes = ['yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'correct', 'right', 'ja', 'jawohl', 'klar', 'stimmt'];
+    const no = ['no', 'nope', 'not', 'cancel', 'nein', 'nicht', 'ne', 'abbrechen'];
     const answer = await this.ask(question, { expect: [...yes, ...no], timeout, retries });
     if (answer == null) return null;
     return yes.includes(answer);
   }
 
-  /** Wird beim Stopp der Runtime aufgerufen. */
+  /** Called when the runtime stops. */
   dispose() {
     this._want = false;
     clearTimeout(this._restartTimer);

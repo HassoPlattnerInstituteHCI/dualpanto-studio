@@ -2,12 +2,12 @@
 // that support Web Serial). A project is split into plain files so two people can work on
 // it with git: different levels are different files, and a script conflict is a text conflict.
 //
-//   mein-spiel/
-//   ├── projekt.json        name, settings, order of the levels
+//   my-game/
+//   ├── project.json        name, settings, order of the levels
 //   ├── main.js             main script
-//   ├── levels/gang.json    objects, start positions, intro
-//   ├── levels/gang.js      level script
-//   ├── sounds/treffer.wav
+//   ├── levels/hallway.json objects, start positions, intro
+//   ├── levels/hallway.js   level script
+//   ├── sounds/hit.wav
 //   └── README.md           written once, explains the layout
 //
 // Everything here takes a directory handle, so it can be tested with a fake handle.
@@ -16,13 +16,15 @@ import { normalize, uid } from './project.js';
 import { getAsset, putAsset, listAssets, deleteAsset, revokeUrl } from './assets.js';
 
 export const FOLDER_FORMAT = 2;
-export const PROJECT_FILE = 'projekt.json';
+export const PROJECT_FILE = 'project.json';
+// Older folders have the German name. They are still read and get renamed on the next save.
+const LEGACY_PROJECT_FILE = 'projekt.json';
 
 export const supportsFolders = () => typeof window !== 'undefined' && 'showDirectoryPicker' in window;
 
 /** Asks the user for a folder. Must be called from a click. */
 export async function pickFolder() {
-  if (!supportsFolders()) throw new Error('Dieser Browser kann keine Ordner öffnen. Chrome oder Edge am Computer verwenden.');
+  if (!supportsFolders()) throw new Error('This browser cannot open folders. Use Chrome or Edge on desktop.');
   return window.showDirectoryPicker({ id: 'dualpanto-projects', mode: 'readwrite', startIn: 'documents' });
 }
 
@@ -49,6 +51,17 @@ export function slugify(name, taken = new Set()) {
   while (taken.has(slug)) slug = `${base}-${i++}`;
   taken.add(slug);
   return slug;
+}
+
+/** true if the folder contains a project file (current or legacy name). */
+export async function hasProjectFile(dir) {
+  for (const name of [PROJECT_FILE, LEGACY_PROJECT_FILE]) {
+    try {
+      await dir.getFileHandle(name);
+      return true;
+    } catch {}
+  }
+  return false;
 }
 
 async function readText(dir, name) {
@@ -100,13 +113,13 @@ const json = (value) => JSON.stringify(value, null, 2) + '\n';
  * Returns a normalized project with `folderSlugs` (level id -> file name).
  */
 export async function readProjectFromFolder(dir, { projectId } = {}) {
-  const text = await readText(dir, PROJECT_FILE);
-  if (text == null) throw new Error(`In diesem Ordner liegt keine ${PROJECT_FILE}. „Projekt in Ordner speichern“ legt eine an.`);
+  const text = (await readText(dir, PROJECT_FILE)) ?? (await readText(dir, LEGACY_PROJECT_FILE));
+  if (text == null) throw new Error(`This folder has no ${PROJECT_FILE}. "Save project to folder" creates one.`);
   let meta;
   try {
     meta = JSON.parse(text);
   } catch (e) {
-    throw new Error(`${PROJECT_FILE} ist kein gültiges JSON: ${e.message}`);
+    throw new Error(`${PROJECT_FILE} is not valid JSON: ${e.message}`);
   }
   const id = projectId ?? uid('p');
   const levelsDir = await subDir(dir, 'levels');
@@ -119,7 +132,7 @@ export async function readProjectFromFolder(dir, { projectId } = {}) {
     try {
       data = JSON.parse(raw);
     } catch (e) {
-      throw new Error(`levels/${slug}.json ist kein gültiges JSON: ${e.message}`);
+      throw new Error(`levels/${slug}.json is not valid JSON: ${e.message}`);
     }
     const level = {
       id: data.id ?? uid('l'),
@@ -145,14 +158,14 @@ export async function readProjectFromFolder(dir, { projectId } = {}) {
       try {
         assets.push(await putAsset(id, file, { name }));
       } catch (e) {
-        console.warn('Sound übersprungen:', name, e);
+        console.warn('Sound skipped:', name, e);
       }
     }
   }
 
   const project = normalize({
     id,
-    name: meta.name ?? dir.name ?? 'Projekt',
+    name: meta.name ?? dir.name ?? 'Project',
     script: (await readText(dir, 'main.js')) ?? '',
     levels,
     startLevel: meta.startLevel ?? null,
@@ -167,24 +180,23 @@ export async function readProjectFromFolder(dir, { projectId } = {}) {
 // ---------------------------------------------------------------------------
 // writing
 
-const README = `# DualPanto-Projekt
+const README = `# DualPanto project
 
-Dieser Ordner wird vom DualPanto Studio gelesen und geschrieben.
+This folder is read and written by DualPanto Studio.
 
-| Datei | Inhalt |
+| File | Contents |
 | --- | --- |
-| \`projekt.json\` | Name, Einstellungen, Reihenfolge der Level |
-| \`main.js\` | Haupt-Skript: Intro, Spielstand, Level-Steuerung |
-| \`levels/<name>.json\` | Objekte, Startpunkte und Intro eines Levels |
-| \`levels/<name>.js\` | Skript dieses Levels |
-| \`sounds/\` | hochgeladene MP3- und WAV-Dateien |
+| \`project.json\` | Name, settings, order of the levels |
+| \`main.js\` | Main script: intro, score, level control |
+| \`levels/<name>.json\` | Objects, start positions and intro of a level |
+| \`levels/<name>.js\` | Script of this level |
+| \`sounds/\` | Uploaded MP3 and WAV files |
 
-Der Ordner ist bewusst in einzelne Dateien aufgeteilt, damit zwei Leute
-gleichzeitig daran arbeiten können: unterschiedliche Level sind
-unterschiedliche Dateien, und ein Konflikt in einem Skript ist ein ganz
-normaler Text-Konflikt in git.
+The folder is deliberately split into separate files so two people can
+work on it at the same time: different levels are different files, and a
+conflict in a script is an ordinary text conflict in git.
 
-Öffnen: im Studio auf „Projekte → Ordner öffnen“.
+To open: in the Studio, "Projects → Open folder".
 `;
 
 /**
@@ -268,6 +280,10 @@ export async function writeProjectToFolder(dir, project) {
     created: project.created ?? Date.now(),
   });
   if (await writeTextIfChanged(dir, PROJECT_FILE, meta)) written.push(PROJECT_FILE);
+  if ((await readText(dir, LEGACY_PROJECT_FILE)) != null) {
+    await dir.removeEntry(LEGACY_PROJECT_FILE).catch(() => {});
+    removed.push(LEGACY_PROJECT_FILE);
+  }
   if ((await readText(dir, 'README.md')) == null) {
     await writeFile(dir, 'README.md', README);
     written.push('README.md');

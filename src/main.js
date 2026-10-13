@@ -15,7 +15,7 @@ import {
 } from './editor/assets.js';
 import {
   supportsFolders, pickFolder, ensurePermission, readProjectFromFolder, writeProjectToFolder,
-  folderSnapshot, snapshotsDiffer, releaseAssets, PROJECT_FILE,
+  folderSnapshot, snapshotsDiffer, releaseAssets, hasProjectFile,
 } from './editor/folder.js';
 import { createCodeEditor } from './editor/code-editor.js';
 import { LevelEditor, TOOLS } from './editor/level-editor.js';
@@ -24,7 +24,7 @@ import { fitView, drawWorld } from './editor/renderer.js';
 import { API_DTS, API_HTML } from './editor/api-docs.js';
 
 /** Shown in the console at startup – makes it obvious when the browser serves an old copy. */
-export const BUILD = '2026-10-12 · switchTo: ruhiges Folgen (ease/lead/smooth)';
+export const BUILD = '2026-10-13 · English UI';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const h = (tag, attrs = {}, ...children) => {
@@ -113,7 +113,7 @@ function saveNow() {
   const ok = saveAll(app.projects);
   if (!ok) {
     $('#save-state').dataset.state = 'dirty';
-    $('#save-state').textContent = 'Nicht gespeichert (Speicher voll?)';
+    $('#save-state').textContent = 'Not saved (storage full?)';
     return;
   }
   renderSaveState();
@@ -125,19 +125,19 @@ function renderSaveState(mode) {
   const hint = $('#storage-hint');
   if (hint) {
     hint.textContent = app.folder
-      ? `Dieses Projekt liegt im Ordner „${app.folder.name}“. Änderungen werden dort gespeichert.`
-      : 'Alles wird automatisch im Browser gespeichert. Unter „Projekte“ kannst du eine Datei exportieren.';
+      ? `This project lives in the folder "${app.folder.name}". Changes are saved there.`
+      : 'Everything is saved in the browser automatically. Under "Projects" you can export a file.';
   }
   if (!app.folder) {
     el.dataset.state = '';
-    el.textContent = mode === 'saving' ? 'Speichert …' : 'Im Browser gespeichert';
-    el.title = 'Dieses Projekt liegt im Browser-Speicher. Unter „Projekte“ kannst du es in einen Ordner legen.';
+    el.textContent = mode === 'saving' ? 'Saving …' : 'Saved in browser';
+    el.title = 'This project lives in browser storage. Under "Projects" you can move it into a folder.';
     return;
   }
   const dirty = app.folderDirty;
   el.dataset.state = dirty ? 'dirty' : 'folder';
-  el.textContent = `${app.folder.name}${dirty ? ' · ungespeichert' : ' · gespeichert'}`;
-  el.title = dirty ? 'Noch nicht in den Ordner geschrieben (Strg/⌘ + S)' : 'Alle Dateien im Ordner sind aktuell.';
+  el.textContent = `${app.folder.name}${dirty ? ' · unsaved' : ' · saved'}`;
+  el.title = dirty ? 'Not yet written to the folder (Ctrl/⌘ + S)' : 'All files in the folder are up to date.';
 }
 
 function openProject(project, { keepFolder = false } = {}) {
@@ -153,8 +153,8 @@ function openProject(project, { keepFolder = false } = {}) {
   setCurrentId(app.project.id);
   $('#project-name').value = app.project.name;
   $('#opt-boundary').checked = !!app.project.settings.boundary;
-  // Editor-Dokumente des alten Projekts wegwerfen: "main" heißt im neuen Projekt
-  // genauso, und ein übrig gebliebenes Dokument würde dessen Skript überschreiben.
+  // Throw away the old project's editor documents: "main" has the same name in the new
+  // project, and a leftover document would overwrite its script.
   app.code?.reset();
   openScript('main');
   app.view = 'script';
@@ -167,7 +167,7 @@ function openProject(project, { keepFolder = false } = {}) {
   else renderSounds();
   app.folderDirty = false;
   renderSaveState();
-  log('info', `Projekt „${app.project.name}“ geöffnet.`);
+  log('info', `Project "${app.project.name}" opened.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -190,20 +190,20 @@ function renderSidebar() {
         { class: 'level-open', onclick: () => selectView(level.id), 'aria-current': app.view === level.id ? 'page' : 'false' },
         canvas,
         h('span', { class: 'level-name' }, level.name),
-        level.script?.trim() ? h('span', { class: 'level-script-badge', title: 'Dieses Level hat ein eigenes Skript' }, 'JS') : null,
-        level.name === start ? h('span', { class: 'badge', title: 'Wird beim Start geladen' }, 'Start') : null
+        level.script?.trim() ? h('span', { class: 'level-script-badge', title: 'This level has its own script' }, 'JS') : null,
+        level.name === start ? h('span', { class: 'badge', title: 'Loaded on start' }, 'Start') : null
       ),
       h(
         'div',
         { class: 'level-actions' },
-        h('button', { class: 'icon-btn', title: 'Duplizieren', 'aria-label': `${level.name} duplizieren`, onclick: () => duplicateLevel(level) }, iconCopy()),
-        h('button', { class: 'icon-btn', title: 'Löschen', 'aria-label': `${level.name} löschen`, onclick: () => deleteLevel(level) }, iconTrash())
+        h('button', { class: 'icon-btn', title: 'Duplicate', 'aria-label': `Duplicate ${level.name}`, onclick: () => duplicateLevel(level) }, iconCopy()),
+        h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${level.name}`, onclick: () => deleteLevel(level) }, iconTrash())
       )
     );
     list.append(item);
     requestAnimationFrame(() => drawThumb(canvas, level));
   }
-  if (!p.levels.length) list.append(h('li', { class: 'empty' }, 'Noch keine Level. Apps brauchen nicht unbedingt eins.'));
+  if (!p.levels.length) list.append(h('li', { class: 'empty' }, 'No levels yet. Apps don\'t necessarily need one.'));
 }
 
 function drawThumb(canvas, level) {
@@ -242,7 +242,7 @@ function showView() {
   const showCode = !level || app.subtab === 'script';
   $('#view-script').hidden = !showCode;
   $('#view-level').hidden = !(level && app.subtab === 'level');
-  $('#center-title').textContent = level ? `Level: ${level.name}` : 'Haupt-Skript';
+  $('#center-title').textContent = level ? `Level: ${level.name}` : 'Main script';
   $('#level-tabs').hidden = !level;
   $('#level-opts').hidden = !(level && app.subtab === 'level');
   $('#script-hint').hidden = !showCode;
@@ -272,7 +272,7 @@ function addLevel() {
 function duplicateLevel(level) {
   const copy = JSON.parse(JSON.stringify(level));
   copy.id = uid('l');
-  copy.name = uniqueLevelName(app.project, level.name + ' Kopie');
+  copy.name = uniqueLevelName(app.project, level.name + ' copy');
   copy.objects.forEach((o) => (o.id = uid('o')));
   app.project.levels.splice(app.project.levels.indexOf(level) + 1, 0, copy);
   scheduleSave();
@@ -280,7 +280,7 @@ function duplicateLevel(level) {
 }
 
 function deleteLevel(level) {
-  if (!confirm(`Level „${level.name}“ löschen?`)) return;
+  if (!confirm(`Delete level "${level.name}"?`)) return;
   app.project.levels = app.project.levels.filter((l) => l !== level);
   app.code?.forget(fileKey(level));
   if (app.project.startLevel === level.name) app.project.startLevel = null;
@@ -293,7 +293,7 @@ function deleteLevel(level) {
 
 async function connectFolder(handle, { read = true } = {}) {
   if (!(await ensurePermission(handle))) {
-    log('warn', 'Ohne Schreibrechte für den Ordner geht es nicht.');
+    log('warn', 'This does not work without write access to the folder.');
     return false;
   }
   if (read) {
@@ -305,44 +305,38 @@ async function connectFolder(handle, { read = true } = {}) {
   app.folder = { handle, name: handle.name, autoSave: true, snapshot: await folderSnapshot(handle) };
   app.folderDirty = false;
   await rememberFolder(app.project.id, handle, handle.name).catch((e) => {
-    log('warn', 'Ordner konnte nicht für später gemerkt werden: ' + e.message);
+    log('warn', 'Could not remember the folder for later: ' + e.message);
   });
   renderSaveState();
   renderFolderUi();
   startFolderWatch();
-  log('info', `Ordner „${handle.name}“ verbunden. Änderungen werden automatisch hineingeschrieben.`);
+  log('info', `Folder "${handle.name}" connected. Changes are written to it automatically.`);
   return true;
 }
 
 async function openFolder(handle) {
   try {
     const dir = handle ?? (await pickFolder());
-    if (!(await ensurePermission(dir))) return log('warn', 'Zugriff auf den Ordner wurde nicht erlaubt.');
-    let hasProject = true;
-    try {
-      await dir.getFileHandle(PROJECT_FILE);
-    } catch {
-      hasProject = false;
-    }
-    if (hasProject) return void (await connectFolder(dir));
-    if (!confirm(`In „${dir.name}“ liegt noch kein Projekt.\n\nSoll „${app.project.name}“ dort gespeichert werden?`)) return;
+    if (!(await ensurePermission(dir))) return log('warn', 'Access to the folder was not allowed.');
+    if (await hasProjectFile(dir)) return void (await connectFolder(dir));
+    if (!confirm(`There is no project in "${dir.name}" yet.\n\nSave "${app.project.name}" there?`)) return;
     await connectFolder(dir, { read: false });
     await saveToFolder();
   } catch (e) {
     if (e.name === 'AbortError') return;
-    log('error', 'Ordner konnte nicht geöffnet werden: ' + e.message);
+    log('error', 'Could not open the folder: ' + e.message);
   }
 }
 
 async function saveAsFolder() {
   try {
     const dir = await pickFolder();
-    if (!(await ensurePermission(dir))) return log('warn', 'Zugriff auf den Ordner wurde nicht erlaubt.');
+    if (!(await ensurePermission(dir))) return log('warn', 'Access to the folder was not allowed.');
     await connectFolder(dir, { read: false });
     await saveToFolder();
   } catch (e) {
     if (e.name === 'AbortError') return;
-    log('error', 'Speichern nicht möglich: ' + e.message);
+    log('error', 'Cannot save: ' + e.message);
   }
 }
 
@@ -358,12 +352,12 @@ async function saveToFolder({ silent = false } = {}) {
     renderSaveState();
     if (!silent) {
       const parts = [];
-      if (written.length) parts.push(`${written.length} Datei${written.length > 1 ? 'en' : ''} geschrieben`);
-      if (removed.length) parts.push(`${removed.length} gelöscht`);
-      log('info', `Ordner „${app.folder.name}“: ${parts.join(', ') || 'nichts geändert'}.`);
+      if (written.length) parts.push(`${written.length} file${written.length > 1 ? 's' : ''} written`);
+      if (removed.length) parts.push(`${removed.length} deleted`);
+      log('info', `Folder "${app.folder.name}": ${parts.join(', ') || 'nothing changed'}.`);
     }
   } catch (e) {
-    log('error', 'Schreiben in den Ordner fehlgeschlagen: ' + e.message);
+    log('error', 'Writing to the folder failed: ' + e.message);
   }
 }
 
@@ -377,9 +371,9 @@ async function reloadFromFolder({ auto = false } = {}) {
     app.folder.snapshot = await folderSnapshot(app.folder.handle);
     app.folderDirty = false;
     renderSaveState();
-    log('info', auto ? `Ordner „${app.folder.name}“ wurde außerhalb geändert – neu geladen.` : 'Projekt aus dem Ordner neu geladen.');
+    log('info', auto ? `Folder "${app.folder.name}" was changed outside – reloaded.` : 'Project reloaded from the folder.');
   } catch (e) {
-    log('error', 'Neu laden fehlgeschlagen: ' + e.message);
+    log('error', 'Reload failed: ' + e.message);
   }
 }
 
@@ -392,10 +386,10 @@ function disconnectFolder() {
   app.folderWatch = null;
   renderSaveState();
   renderFolderUi();
-  log('info', `Ordner „${name}“ getrennt. Das Projekt liegt weiter im Browser-Speicher.`);
+  log('info', `Folder "${name}" disconnected. The project stays in browser storage.`);
 }
 
-/** Notices when someone else (git pull, der andere Rechner) changed the files. */
+/** Notices when someone else (git pull, the other computer) changed the files. */
 function startFolderWatch() {
   clearInterval(app.folderWatch);
   app.folderWatch = setInterval(async () => {
@@ -405,7 +399,7 @@ function startFolderWatch() {
       if (!snapshotsDiffer(app.folder.snapshot, snap)) return;
       app.folder.snapshot = snap;
       if (app.folderDirty || app.runtime?.running) {
-        log('warn', 'Der Ordner wurde außerhalb geändert. „Projekte → Vom Ordner neu laden“ holt den Stand, überschreibt aber deine ungespeicherten Änderungen.');
+        log('warn', 'The folder was changed outside. "Projects → Reload from folder" fetches that state but overwrites your unsaved changes.');
         return;
       }
       await reloadFromFolder({ auto: true });
@@ -425,7 +419,7 @@ async function renderFolderList() {
   const list = $('#folder-list');
   list.replaceChildren();
   if (!supportsFolders()) {
-    list.append(h('li', { class: 'empty muted small' }, 'Dieser Browser unterstützt keine Ordner. Chrome oder Edge am Computer verwenden.'));
+    list.append(h('li', { class: 'empty muted small' }, 'This browser does not support folders. Use Chrome or Edge on desktop.'));
     $('#btn-open-folder').disabled = true;
     $('#btn-save-folder').disabled = true;
     return;
@@ -437,8 +431,8 @@ async function renderFolderList() {
       h('li', { class: 'project-row folder-row' + (current ? ' current' : '') },
         h('button', { class: 'project-open', onclick: () => { $('#dlg-open').close(); openFolder(entry.handle); } },
           h('strong', {}, entry.name),
-          h('span', { class: 'muted' }, `Ordner · zuletzt ${new Date(entry.opened).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}`)),
-        current ? h('span', { class: 'badge' }, 'offen') : h('button', { class: 'icon-btn', title: 'Aus der Liste entfernen', onclick: async () => { await forgetFolder(entry.id); renderFolderList(); } }, iconTrash()))
+          h('span', { class: 'muted' }, `Folder · last opened ${new Date(entry.opened).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}`)),
+        current ? h('span', { class: 'badge' }, 'open') : h('button', { class: 'icon-btn', title: 'Remove from list', onclick: async () => { await forgetFolder(entry.id); renderFolderList(); } }, iconTrash()))
     );
   }
 }
@@ -455,7 +449,7 @@ function renderSounds() {
   list.replaceChildren();
   const assets = app.project.assets ?? [];
   if (!assets.length) {
-    list.append(h('li', { class: 'empty' }, 'MP3 oder WAV hierher ziehen oder ＋ drücken.'));
+    list.append(h('li', { class: 'empty' }, 'Drag MP3 or WAV here or press ＋.'));
   }
   for (const a of assets) {
     const playing = app.preview?.id === a.id;
@@ -463,15 +457,15 @@ function renderSounds() {
       'li',
       { class: 'sound-item' },
       h('button', {
-        class: 'icon-btn', title: playing ? 'Stopp' : 'Anhören', 'aria-label': `${a.name} ${playing ? 'stoppen' : 'anhören'}`,
+        class: 'icon-btn', title: playing ? 'Stop' : 'Listen', 'aria-label': `${playing ? 'Stop' : 'Play'} ${a.name}`,
         onclick: () => togglePreview(a),
       }, playing ? '■' : '▶'),
       h('button', {
-        class: 'sound-meta', title: `${a.name} – klicken fügt sound.play("${a.name}") ins Skript ein`,
+        class: 'sound-meta', title: `${a.name} – click to insert sound.play("${a.name}") into the script`,
         onclick: () => insertSnippet(soundSnippet(a.name)),
       }, h('span', { class: 'sound-name' }, a.name), h('span', { class: 'sound-size' }, formatBytes(a.size))),
       h('div', { class: 'sound-actions' },
-        h('button', { class: 'icon-btn', title: 'Löschen', 'aria-label': `${a.name} löschen`, onclick: () => removeSound(a) }, iconTrash()))
+        h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${a.name}`, onclick: () => removeSound(a) }, iconTrash()))
     );
     list.append(item);
   }
@@ -487,13 +481,13 @@ function togglePreview(a) {
   }
   app.preview?.audio.pause();
   assetUrl(a.id).then((url) => {
-    if (!url) return log('error', `„${a.name}“ ist nicht mehr gespeichert.`);
+    if (!url) return log('error', `"${a.name}" is no longer stored.`);
     const audio = new Audio(url);
     audio.onended = () => {
       if (app.preview?.id === a.id) app.preview = null;
       renderSounds();
     };
-    audio.play().catch((e) => log('warn', 'Abspielen nicht möglich: ' + e.message));
+    audio.play().catch((e) => log('warn', 'Cannot play: ' + e.message));
     app.preview = { id: a.id, audio };
     renderSounds();
   });
@@ -518,7 +512,7 @@ async function addSounds(files) {
   if (!list.length) return;
   for (const file of list) {
     if (!isAudioFile(file)) {
-      log('warn', `„${file.name}“ ist keine Audiodatei – übersprungen.`);
+      log('warn', `"${file.name}" is not an audio file – skipped.`);
       continue;
     }
     let name = file.name;
@@ -530,14 +524,14 @@ async function addSounds(files) {
       let i = 2;
       while (taken.has(`${stem}-${i}${ext}`)) i++;
       name = `${stem}-${i}${ext}`;
-      log('info', `Name schon vergeben, gespeichert als „${name}“.`);
+      log('info', `Name already taken, saved as "${name}".`);
     }
     try {
       const meta = await putAsset(app.project.id, file, { name });
       app.project.assets = [...(app.project.assets ?? []), meta];
-      log('info', `Sound „${meta.name}“ gespeichert (${formatBytes(meta.size)}). Abspielen mit sound.play("${meta.name}").`);
+      log('info', `Sound "${meta.name}" saved (${formatBytes(meta.size)}). Play it with sound.play("${meta.name}").`);
     } catch (e) {
-      log('error', 'Speichern fehlgeschlagen: ' + e.message);
+      log('error', 'Saving failed: ' + e.message);
     }
   }
   saveNow();
@@ -545,7 +539,7 @@ async function addSounds(files) {
 }
 
 async function removeSound(a) {
-  if (!confirm(`Sound „${a.name}“ löschen?`)) return;
+  if (!confirm(`Delete sound "${a.name}"?`)) return;
   if (app.preview?.id === a.id) {
     app.preview.audio.pause();
     app.preview = null;
@@ -554,7 +548,7 @@ async function removeSound(a) {
   app.project.assets = (app.project.assets ?? []).filter((x) => x.id !== a.id);
   saveNow();
   renderSounds();
-  log('info', `Sound „${a.name}“ gelöscht.`);
+  log('info', `Sound "${a.name}" deleted.`);
 }
 
 async function updateStorageInfo() {
@@ -563,7 +557,7 @@ async function updateStorageInfo() {
   const { usage, quota } = await storageInfo();
   const parts = [];
   if (assets.length) parts.push(`${assets.length} Sound${assets.length > 1 ? 's' : ''}, ${formatBytes(own)}`);
-  if (quota) parts.push(`Browser-Speicher: ${formatBytes(usage)} von ${formatBytes(quota)}`);
+  if (quota) parts.push(`Browser storage: ${formatBytes(usage)} of ${formatBytes(quota)}`);
   $('#storage-info').textContent = parts.join(' · ');
 }
 
@@ -577,7 +571,7 @@ async function syncAssetList() {
     for (const a of stored) if (!app.project.assets.some((x) => x.id === a.id)) app.project.assets.push(a);
     if (before !== app.project.assets.length) saveNow();
   } catch (e) {
-    log('warn', 'Sound-Speicher nicht verfügbar: ' + e.message);
+    log('warn', 'Sound storage not available: ' + e.message);
   }
   renderSounds();
 }
@@ -602,39 +596,39 @@ function renameInScript(oldName, newName) {
     app.code?.setValue(key, after);
     touched++;
   }
-  if (touched) log('info', `„${oldName}“ in „${newName}“ umbenannt (${touched} Skript${touched > 1 ? 'e' : ''} angepasst).`);
+  if (touched) log('info', `Renamed "${oldName}" to "${newName}" (${touched} script${touched > 1 ? 's' : ''} updated).`);
 }
 
 function snippetFor(obj) {
   if (!obj.name) return null;
   const name = JSON.stringify(obj.name);
   if (obj.type === 'zone') {
-    return `level.zone(${name}).onEnter(() => {\n  speak("Hier bist du richtig!");\n});`;
+    return `level.zone(${name}).onEnter(() => {\n  speak("You found it!");\n});`;
   }
   if (obj.type === 'entity') {
     if (obj.kind === 'item') {
       return `level.entity(${name}).onCollect(() => {
-  state.punkte = (state.punkte ?? 0) + 1;
-  speak("Gesammelt: " + state.punkte);
+  state.score = (state.score ?? 0) + 1;
+  speak("Collected: " + state.score);
 });`;
     }
     if (obj.kind === 'enemy') {
       const x = Math.round(obj.x);
       const y = Math.round(obj.y);
-      return `const gegner = level.entity(${name});
-// läuft hin und her; speed in mm/s
-gegner.patrol([[${x}, ${y}], [${Math.min(290, x + 60)}, ${y}]], { speed: 40 });
-gegner.onTouch(() => {
-  speak("Erwischt!");
-  panto.loadLevel(panto.level.name);   // von vorn
+      return `const enemy = level.entity(${name});
+// walks back and forth; speed in mm/s
+enemy.patrol([[${x}, ${y}], [${Math.min(290, x + 60)}, ${y}]], { speed: 40 });
+enemy.onTouch(() => {
+  speak("Caught!");
+  panto.loadLevel(panto.level.name);   // start over
 });`;
     }
-    return `const ziel = level.entity(${name});
-ziel.onTouch(() => speak("Gefunden!"));
-// ziel.follow(me, { speed: 30 });   // folgt dem Me-Griff
-// ziel.attachTo("it");              // It fährt dauernd dorthin`;
+    return `const target = level.entity(${name});
+target.onTouch(() => speak("Found it!"));
+// target.follow(me, { speed: 30 });   // follows the Me handle
+// target.attachTo("it");              // It keeps moving there`;
   }
-  return `const obj = level.object(${name});\nobj.disable(); // z. B. eine Tür öffnen`;
+  return `const obj = level.object(${name});\nobj.disable(); // e.g. open a door`;
 }
 
 /** Appends a snippet to the current level's script and opens it. */
@@ -664,7 +658,7 @@ function renderProps(obj) {
       const v = name.value.trim();
       if (!v || app.project.levels.some((l) => l !== level && l.name === v)) {
         name.value = level.name;
-        return log('warn', 'Level-Namen müssen eindeutig und nicht leer sein.');
+        return log('warn', 'Level names must be unique and not empty.');
       }
       if (app.project.startLevel === level.name) app.project.startLevel = v;
       renameInScript(level.name, v);
@@ -673,7 +667,7 @@ function renderProps(obj) {
       renderSidebar();
       $('#center-title').textContent = `Level: ${v}`;
     });
-    const intro = h('textarea', { rows: 3, placeholder: 'z. B. „Level 1. Finde den Ausgang.“' });
+    const intro = h('textarea', { rows: 3, placeholder: 'e.g. "Level 1. Find the exit."' });
     intro.value = level.intro ?? '';
     intro.addEventListener('input', () => {
       level.intro = intro.value;
@@ -690,25 +684,25 @@ function renderProps(obj) {
     const spawnInfo = (k) =>
       sp[k]
         ? h('span', { class: 'spawn-row' }, `${Math.round(sp[k].x)}, ${Math.round(sp[k].y)} mm `,
-          h('button', { class: 'link-btn', onclick: () => { ed.snapshot(); delete level.spawn[k]; ed.changed(); renderProps(null); } }, 'entfernen'))
-        : h('span', { class: 'muted' }, 'nicht gesetzt – Werkzeug „Start ' + (k === 'me' ? 'Me' : 'It') + '“');
+          h('button', { class: 'link-btn', onclick: () => { ed.snapshot(); delete level.spawn[k]; ed.changed(); renderProps(null); } }, 'remove'))
+        : h('span', { class: 'muted' }, 'not set – tool "Start ' + (k === 'me' ? 'Me' : 'It') + '"');
     panel.append(
       h('h3', {}, 'Level'),
-      field('Name', name, 'Mit diesem Namen lädst du das Level im Skript.'),
-      field('Beim Laden sagen', intro),
-      h('label', { class: 'check' }, start, 'Beim Programmstart laden'),
+      field('Name', name, 'Use this name to load the level in the script.'),
+      field('Say on load', intro),
+      h('label', { class: 'check' }, start, 'Load when the program starts'),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Start Me'), spawnInfo('me')),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Start It'), spawnInfo('it')),
-      h('button', { class: 'btn btn-secondary full', onclick: () => run({ startLevel: level.name }) }, '▶ Dieses Level testen'),
-      h('p', { class: 'muted small' }, `${level.objects.length} Objekte. Wähle ein Objekt aus, um es zu bearbeiten.`)
+      h('button', { class: 'btn btn-secondary full', onclick: () => run({ startLevel: level.name }) }, '▶ Test this level'),
+      h('p', { class: 'muted small' }, `${level.objects.length} objects. Select an object to edit it.`)
     );
     return;
   }
 
   const typeLabel = obj.type === 'entity'
-    ? { enemy: 'Gegner', item: 'Item' }[obj.kind] ?? 'Objekt'
-    : { wall: 'Wand', rail: 'Schiene', zone: 'Zone' }[obj.type];
-  const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'wall' || obj.type === 'rail' ? 'optional, z. B. Tür' : 'z. B. Ziel' });
+    ? { enemy: 'Enemy', item: 'Item' }[obj.kind] ?? 'Object'
+    : { wall: 'Wall', rail: 'Rail', zone: 'Zone' }[obj.type];
+  const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'wall' || obj.type === 'rail' ? 'optional, e.g. Door' : 'e.g. Goal' });
   let before = obj.name;
   nameIn.addEventListener('input', () => ed.update(obj, { name: nameIn.value }, { history: false }));
   nameIn.addEventListener('focus', () => {
@@ -719,7 +713,7 @@ function renderProps(obj) {
     renameInScript(before, nameIn.value);
     before = nameIn.value;
   });
-  panel.append(h('h3', {}, typeLabel), field('Name', nameIn, 'Über den Namen findest du das Objekt im Skript.'));
+  panel.append(h('h3', {}, typeLabel), field('Name', nameIn, 'The script finds the object by this name.'));
 
   const check = (label, key, hint, def = false) => {
     const c = h('input', { type: 'checkbox', checked: obj[key] ?? def });
@@ -744,10 +738,10 @@ function renderProps(obj) {
 
   if (obj.type === 'wall') {
     panel.append(
-      check('Geschlossene Form', 'closed'),
-      check('Durchlässig (mit Kraft überwindbar)', 'passable'),
-      check('Beim Start aktiv', 'enabled', null, true),
-      select('Gilt für', 'handles', [['both', 'Beide Griffe'], ['me', 'Nur Me'], ['it', 'Nur It']], 'both')
+      check('Closed shape', 'closed'),
+      check('Passable (can be pushed through)', 'passable'),
+      check('Active on start', 'enabled', null, true),
+      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both')
     );
   } else if (obj.type === 'rail') {
     const r = h('input', { type: 'range', min: 2, max: 20, step: 1, value: obj.strength ?? 6 });
@@ -758,67 +752,67 @@ function renderProps(obj) {
       ed.update(obj, { strength: +r.value }, { history: false });
     });
     panel.append(
-      field('Stärke (Fangbreite)', h('div', { class: 'range-row' }, r, out), 'Wie weit man sich von der Schiene entfernen muss, um sie zu verlassen.'),
-      check('Beim Start aktiv', 'enabled', null, true),
-      select('Gilt für', 'handles', [['both', 'Beide Griffe'], ['me', 'Nur Me'], ['it', 'Nur It']], 'both')
+      field('Strength (capture width)', h('div', { class: 'range-row' }, r, out), 'How far you have to move away from the rail to leave it.'),
+      check('Active on start', 'enabled', null, true),
+      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both')
     );
   } else if (obj.type === 'entity') {
-    const kindSel = h('select', {}, [['enemy', 'Gegner'], ['item', 'Item'], ['marker', 'Markierung']]
+    const kindSel = h('select', {}, [['enemy', 'Enemy'], ['item', 'Item'], ['marker', 'Marker']]
       .map(([v, l]) => h('option', { value: v, selected: (obj.kind ?? 'marker') === v }, l)));
     kindSel.addEventListener('change', () => {
       ed.update(obj, { kind: kindSel.value });
       renderProps(obj); // andere Art, andere Optionen
     });
-    const say = h('textarea', { rows: 2, placeholder: obj.kind === 'item' ? 'z. B. „Münze!“' : 'z. B. „Autsch!“' });
+    const say = h('textarea', { rows: 2, placeholder: obj.kind === 'item' ? 'e.g. "Coin!"' : 'e.g. "Ouch!"' });
     say.value = obj.speak ?? '';
     say.addEventListener('focus', () => ed.snapshot());
     say.addEventListener('input', () => ed.update(obj, { speak: say.value }, { history: false }));
     const sounds = app.project.assets ?? [];
     const sndSel = h('select', {}, [
-      h('option', { value: '', selected: !obj.sound }, '– kein Sound –'),
+      h('option', { value: '', selected: !obj.sound }, '– no sound –'),
       ...sounds.map((a) => h('option', { value: a.name, selected: obj.sound === a.name }, a.name)),
     ]);
     sndSel.addEventListener('change', () => ed.update(obj, { sound: sndSel.value }));
     panel.append(
-      field('Art', kindSel, 'Gegner und Items werden angezeigt; im Skript bekommen sie ihr Verhalten.'),
-      range('Radius (Berührung)', 'r', { min: 4, max: 40, hint: 'So nah muss der Griff kommen, damit onTouch auslöst.' }),
-      field('Beim Berühren sagen', say),
-      field('Beim Berühren abspielen', sndSel, sounds.length ? null : 'Sounds lädst du links in der Seitenleiste hoch.'),
-      check('Fühlbar: runde Wand auf dem Gerät', 'solid', 'Ohne Haken ist das Objekt nur sichtbar und reagiert auf Berührung. Mit Haken legt die Runtime eine runde Wand an; bewegte Objekte werden nur beim Anhalten neu übertragen.'),
-      obj.kind === 'item' ? check('Verschwindet beim Einsammeln', 'vanish', null, true) : null,
-      select('Reagiert auf', 'handle', [['me', 'Me-Griff'], ['it', 'It-Griff'], ['both', 'Beide']], 'me'),
-      check('Beim Start sichtbar', 'enabled', null, true)
+      field('Kind', kindSel, 'Enemies and items are shown; the script gives them their behaviour.'),
+      range('Radius (touch)', 'r', { min: 4, max: 40, hint: 'How close the handle has to get for onTouch to fire.' }),
+      field('Say on touch', say),
+      field('Play on touch', sndSel, sounds.length ? null : 'Upload sounds in the sidebar on the left.'),
+      check('Tangible: round wall on the device', 'solid', 'Unchecked, the object is only visible and reacts to touch. Checked, the runtime creates a round wall; moving objects are only re-sent when they stop.'),
+      obj.kind === 'item' ? check('Disappears when collected', 'vanish', null, true) : null,
+      select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
+      check('Visible on start', 'enabled', null, true)
     );
   } else if (obj.type === 'zone') {
-    const say = h('textarea', { rows: 2, placeholder: 'Optional, z. B. „Du bist am Ziel.“' });
+    const say = h('textarea', { rows: 2, placeholder: 'Optional, e.g. "You reached the goal."' });
     say.value = obj.speak ?? '';
     say.addEventListener('focus', () => ed.snapshot());
     say.addEventListener('input', () => ed.update(obj, { speak: say.value }, { history: false }));
     panel.append(
-      field('Beim Betreten sagen', say),
-      select('Reagiert auf', 'handle', [['me', 'Me-Griff'], ['it', 'It-Griff'], ['both', 'Beide']], 'me'),
-      check('Beim Start aktiv', 'enabled', null, true)
+      field('Say on enter', say),
+      select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
+      check('Active on start', 'enabled', null, true)
     );
   }
 
   const snippet = snippetFor(obj);
   panel.append(
     snippet == null
-      ? h('p', { class: 'muted small' }, 'Gib dem Objekt einen Namen, um es im Skript anzusprechen.')
+      ? h('p', { class: 'muted small' }, 'Give the object a name to use it in the script.')
       : h('div', { class: 'snippet' },
-      h('div', { class: 'snippet-head' }, h('span', {}, 'Im Level-Skript'),
+      h('div', { class: 'snippet-head' }, h('span', {}, 'In the level script'),
         h('span', { class: 'snippet-actions' },
-          h('button', { class: 'link-btn', onclick: () => appendToLevelScript(snippet) }, 'Einfügen'),
+          h('button', { class: 'link-btn', onclick: () => appendToLevelScript(snippet) }, 'Insert'),
           h('button', {
             class: 'link-btn',
             onclick: (e) => {
               navigator.clipboard?.writeText(snippet);
-              e.target.textContent = 'Kopiert';
-              setTimeout(() => (e.target.textContent = 'Kopieren'), 1200);
+              e.target.textContent = 'Copied';
+              setTimeout(() => (e.target.textContent = 'Copy'), 1200);
             },
-          }, 'Kopieren'))),
+          }, 'Copy'))),
       h('pre', {}, snippet)),
-    h('button', { class: 'btn btn-danger full', onclick: () => ed.deleteSelected() }, 'Objekt löschen')
+    h('button', { class: 'btn btn-danger full', onclick: () => ed.deleteSelected() }, 'Delete object')
   );
 }
 
@@ -842,7 +836,7 @@ function log(level, text, line, source) {
       else selectView('script');
       if (line) app.code?.revealLine(line);
     };
-    row.append(h('button', { class: 'link-btn log-line', onclick: open }, line ? `Zeile ${line}${where}` : `öffnen${where}`));
+    row.append(h('button', { class: 'link-btn log-line', onclick: open }, line ? `Line ${line}${where}` : `open${where}`));
     if (line) app.code?.markError(key, line, text);
   }
   list.append(row);
@@ -864,25 +858,25 @@ function selectTab(tab) {
 // ---------------------------------------------------------------------------
 // microphone (voice input)
 
-const VOICE_LABEL = { off: '🎤 aus', listening: '🎤 hört', paused: '🎤 Pause', error: '🎤 blockiert' };
+const VOICE_LABEL = { off: '🎤 off', listening: '🎤 listening', paused: '🎤 paused', error: '🎤 blocked' };
 const VOICE_TITLE = {
-  off: 'Das Programm hört nicht zu. Klicken startet das Mikrofon.',
-  listening: 'Das Mikrofon ist an. Klicken schaltet es aus.',
-  paused: 'Kurze Pause (der Erkenner startet gleich wieder oder die App spricht gerade).',
-  error: 'Kein Zugriff auf das Mikrofon – im Browser links neben der Adresse erlauben.',
+  off: 'The program is not listening. Click to start the microphone.',
+  listening: 'The microphone is on. Click to turn it off.',
+  paused: 'Short pause (the recogniser restarts in a moment, or the app is speaking).',
+  error: 'No access to the microphone – allow it in the browser, left of the address bar.',
 };
 
 function renderVoice(info) {
   const pill = $('#voice-status');
   const v = app.runtime?.voice;
-  // sichtbar, sobald ein Projekt die Spracheingabe benutzt
+  // visible as soon as a project uses voice input
   const used = !!v && (v.state !== 'off' || v._commands?.size || v._text?.size || v._partial?.size);
   pill.hidden = !used;
   const state = v?.state ?? 'off';
   pill.dataset.state = state;
   pill.textContent = VOICE_LABEL[state] ?? VOICE_LABEL.off;
   pill.title = VOICE_TITLE[state] ?? '';
-  if (info?.text && !info.partial) pill.title = `Zuletzt verstanden: „${info.text}“`;
+  if (info?.text && !info.partial) pill.title = `Last understood: "${info.text}"`;
 }
 
 function toggleVoice() {
@@ -894,18 +888,18 @@ function toggleVoice() {
 }
 
 /**
- * Sagt in der Konsole, wie die Erkennung in diesem Browser arbeitet.
+ * Tells the console how recognition works in this browser.
  *
- * Bewusst OHNE `SpeechRecognition.available()`: der Aufruf ist experimentell und bringt
- * in einem Chromium ohne Spracherkennungs-Dienst den Renderer zum Absturz (weiße Seite,
- * kein try/catch hilft). Wer es wissen will, ruft im Skript voice.localAvailable() auf.
+ * Deliberately WITHOUT `SpeechRecognition.available()`: the call is experimental and, in
+ * a Chromium without a speech recognition service, crashes the renderer (white page, no
+ * try/catch helps). To find out, call voice.localAvailable() in a script.
  */
 function reportVoiceSupport() {
   if (!VoiceInput.supported) {
-    log('info', 'Spracheingabe: in diesem Browser nicht verfügbar (nur Chrome und Edge am Computer).');
+    log('info', 'Voice input: not available in this browser (only Chrome and Edge on desktop).');
     return;
   }
-  log('info', 'Spracheingabe: verfügbar. In Chrome läuft die Erkennung über einen Server – das Audio geht ins Netz, offline funktioniert sie nicht. voice.localAvailable() prüft, ob dieser Browser auch auf dem Gerät erkennen kann.');
+  log('info', 'Voice input: available. In Chrome, recognition runs on a server – the audio goes over the network and it does not work offline. voice.localAvailable() checks whether this browser can also recognise on the device.');
 }
 
 // ---------------------------------------------------------------------------
@@ -925,8 +919,8 @@ function updateDeviceUi() {
   const serial = app.device?.kind === 'serial';
   const pill = $('#device-status');
   pill.dataset.state = serial ? (app.device.connected ? 'connected' : 'waiting') : 'emulator';
-  pill.textContent = serial ? (app.device.connected ? 'DualPanto verbunden' : 'Verbinde …') : 'Emulator';
-  $('#btn-connect').textContent = serial ? 'Trennen' : 'Gerät verbinden';
+  pill.textContent = serial ? (app.device.connected ? 'DualPanto connected' : 'Connecting …') : 'Emulator';
+  $('#btn-connect').textContent = serial ? 'Disconnect' : 'Connect device';
   $('#stage-hint').hidden = serial;
 }
 
@@ -937,11 +931,11 @@ async function toggleDevice() {
     app.serial = null;
     app.emulator.start();
     attachDevice(app.emulator);
-    log('info', 'Getrennt. Emulator aktiv.');
+    log('info', 'Disconnected. Emulator active.');
     return;
   }
   if (!SerialDevice.isSupported()) {
-    log('warn', 'Dieser Browser unterstützt Web Serial nicht. Bitte Chrome oder Edge am Computer verwenden.');
+    log('warn', 'This browser does not support Web Serial. Please use Chrome or Edge on desktop.');
     return;
   }
   stopRun();
@@ -970,13 +964,13 @@ async function toggleDevice() {
 
 let captionTimer = null;
 
-const SELFTEST_SCRIPT = `// Selbsttest: eine einzelne Wand quer durch die Mitte des Me-Bereichs.
-speak("Selbsttest. Eine Wand liegt quer in der Mitte. Fahre langsam von unten nach oben.");
-const wand = panto.wall([[130, 105], [260, 105]], { name: "Testwand", persistent: true });
-log("Testwand angelegt, Geräte-ID " + wand.id);
+const SELFTEST_SCRIPT = `// Self-test: a single wall across the middle of the Me area.
+speak("Self-test. A wall runs across the middle. Move slowly from bottom to top.");
+const wall = panto.wall([[130, 105], [260, 105]], { name: "Test wall", persistent: true });
+log("Test wall created, device ID " + wall.id);
 me.onMove((p) => {
-  if (!state.oben && p.y < 100) { state.oben = true; sound.tick(); log("über der Wand: " + Math.round(p.y) + " mm"); }
-  if (state.oben && p.y > 112) state.oben = false;
+  if (!state.above && p.y < 100) { state.above = true; sound.tick(); log("above the wall: " + Math.round(p.y) + " mm"); }
+  if (state.above && p.y > 112) state.above = false;
 });
 `;
 
@@ -1050,12 +1044,12 @@ function openProjectsDialog() {
       ...app.projects.map((p) =>
         h('li', { class: 'project-row' + (p.id === app.project.id ? ' current' : '') },
           h('button', { class: 'project-open', onclick: () => { dlg.close(); openProject(p); } },
-            h('strong', {}, p.name), h('span', { class: 'muted' }, `${p.levels.length} Level · geändert ${new Date(p.updated).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}`)),
-          p.id === app.project.id ? h('span', { class: 'badge' }, 'offen') :
+            h('strong', {}, p.name), h('span', { class: 'muted' }, `${p.levels.length} level${p.levels.length === 1 ? '' : 's'} · changed ${new Date(p.updated).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}`)),
+          p.id === app.project.id ? h('span', { class: 'badge' }, 'open') :
             h('button', {
-              class: 'icon-btn', title: 'Löschen', 'aria-label': `${p.name} löschen`,
+              class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${p.name}`,
               onclick: async () => {
-                if (!confirm(`Projekt „${p.name}“ endgültig löschen?`)) return;
+                if (!confirm(`Delete project "${p.name}" permanently?`)) return;
                 app.projects = app.projects.filter((x) => x !== p);
                 saveAll(app.projects);
                 await deleteProjectAssets(p.id).catch(() => {});
@@ -1154,7 +1148,7 @@ async function init() {
   // top bar
   $('#project-name').value = app.project.name;
   $('#project-name').addEventListener('input', (e) => {
-    app.project.name = e.target.value || 'Unbenannt';
+    app.project.name = e.target.value || 'Untitled';
     scheduleSave();
   });
   $('#btn-new').addEventListener('click', openNewDialog);
@@ -1178,7 +1172,7 @@ async function init() {
   $('#btn-export').addEventListener('click', async () => {
     syncScripts();
     const n = (app.project.assets ?? []).length;
-    if (n) log('info', `Exportiere Projekt mit ${n} Sound${n > 1 ? 's' : ''} …`);
+    if (n) log('info', `Exporting project with ${n} sound${n > 1 ? 's' : ''} …`);
     await exportProject(app.project);
   });
   $('#btn-import').addEventListener('click', () => {
@@ -1192,7 +1186,7 @@ async function init() {
     try {
       openProject(await importProjectFile(file));
     } catch (err) {
-      log('error', 'Import fehlgeschlagen: ' + err.message);
+      log('error', 'Import failed: ' + err.message);
     }
   });
   $('#btn-run').addEventListener('click', () => run());
@@ -1202,14 +1196,14 @@ async function init() {
   $('#voice-status').addEventListener('click', toggleVoice);
   $('#btn-selftest').addEventListener('click', () => {
     selectTab('console');
-    log('info', 'Selbsttest: eine Wand wird angelegt. Danach den Me-Griff langsam darüber bewegen.');
-    run({ project: { id: app.project.id, name: 'Selbsttest', script: SELFTEST_SCRIPT, levels: [], settings: { ...app.project.settings, boundary: false } } });
+    log('info', 'Self-test: creating a wall. Then move the Me handle slowly across it.');
+    run({ project: { id: app.project.id, name: 'Self-test', script: SELFTEST_SCRIPT, levels: [], settings: { ...app.project.settings, boundary: false } } });
   });
   $('#opt-boundary').checked = !!app.project.settings.boundary;
   $('#opt-boundary').addEventListener('change', (e) => {
     app.project.settings.boundary = e.target.checked;
     scheduleSave();
-    log('info', e.target.checked ? 'Rand des Me-Bereichs wird beim Start als Wand angelegt.' : 'Rand des Me-Bereichs wird nicht mehr als Wand angelegt.');
+    log('info', e.target.checked ? 'The edge of the Me area will be created as a wall on start.' : 'The edge of the Me area is no longer created as a wall.');
   });
   $('#nav-script').addEventListener('click', () => selectView('script'));
   $('#btn-add-level').addEventListener('click', addLevel);
@@ -1244,7 +1238,7 @@ async function init() {
     d.querySelector('[data-close]')?.addEventListener('click', () => d.close());
   }
   $('#api-doc').innerHTML = API_HTML;
-  if (!SerialDevice.isSupported()) $('#btn-connect').title = 'Web Serial gibt es nur in Chrome und Edge am Computer.';
+  if (!SerialDevice.isSupported()) $('#btn-connect').title = 'Web Serial is only available in Chrome and Edge on desktop.';
 
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
@@ -1281,11 +1275,11 @@ async function init() {
     recentFolders()
       .then((list) => {
         const entry = list.find((x) => x.id === app.project.id);
-        if (entry) log('info', `Dieses Projekt kam aus dem Ordner „${entry.name}“. Unter „Projekte“ kannst du ihn wieder verbinden.`);
+        if (entry) log('info', `This project came from the folder "${entry.name}". Under "Projects" you can reconnect it.`);
       })
       .catch(() => {});
   }
-  log('info', `Willkommen im DualPanto Studio (${BUILD}).`);
+  log('info', `Welcome to DualPanto Studio (${BUILD}).`);
   reportVoiceSupport();
   console.info('DualPanto Studio', BUILD);
 

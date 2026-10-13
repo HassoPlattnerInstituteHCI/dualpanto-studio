@@ -16,7 +16,7 @@ let dbPromise = null;
 function openDb() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) return reject(new Error('IndexedDB steht in diesem Browser nicht zur Verfügung.'));
+    if (!('indexedDB' in window)) return reject(new Error('IndexedDB is not available in this browser.'));
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -60,7 +60,7 @@ const meta = (r) => ({ id: r.id, name: r.name, type: r.type, size: r.size, creat
 
 export async function putAsset(projectId, file, { name } = {}) {
   if (file.size > MAX_ASSET_BYTES) {
-    throw new Error(`„${file.name}“ ist ${formatBytes(file.size)} groß. Mehr als ${formatBytes(MAX_ASSET_BYTES)} pro Datei geht nicht.`);
+    throw new Error(`"${file.name}" is ${formatBytes(file.size)}. Files can be at most ${formatBytes(MAX_ASSET_BYTES)}.`);
   }
   const record = {
     id: assetId(),

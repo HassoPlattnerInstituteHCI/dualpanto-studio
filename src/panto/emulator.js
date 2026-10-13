@@ -33,7 +33,7 @@ export class Emulator extends Emitter {
       rot: 0,
       pointer: null, // where the user drags this handle
       tween: null, // {from, to, t, duration, v0}
-      vel: { x: 0, y: 0 }, // mm/s, aus dem letzten Tick
+      vel: { x: 0, y: 0 }, // mm/s, from the last tick
       held: false, // position controlled by the program
       target: null,
       speed: 1, // firmware semantics: 1/duration in seconds
@@ -111,9 +111,9 @@ export class Emulator extends Emitter {
     const to = this._clamp(pos, index);
     // firmware semantics: speed = 1 / duration of the transition in seconds
     const duration = 1 / Math.max(0.01, h.speed);
-    // Die Anfangsgeschwindigkeit wird mitgenommen: ein neues Ziel während der Fahrt
-    // lässt die Mechanik weiterlaufen, sie fängt nicht wieder bei Null an. Ohne das
-    // pulsiert ein laufend aktualisiertes Ziel (switchTo) mit der Update-Rate.
+    // The initial velocity is carried over: a new target during a move keeps the
+    // mechanics running instead of starting from zero again. Without this, a
+    // continuously updated target (switchTo) pulses at the update rate.
     h.tween = { from: { ...h.pos }, to, t: 0, duration, v0: h.tween ? { ...h.vel } : { x: 0, y: 0 } };
     h.target = to;
     h.held = true;
@@ -157,8 +157,8 @@ export class Emulator extends Emitter {
         const tw = h.tween;
         tw.t += dt / tw.duration;
         const t = Math.min(1, tw.t);
-        // Hermite: startet mit der vorhandenen Geschwindigkeit v0 und endet in Ruhe.
-        // Mit v0 = 0 ist das dieselbe weiche Kurve wie vorher (einzelnes moveTo).
+        // Hermite: starts with the current velocity v0 and ends at rest.
+        // With v0 = 0 this is the same smooth curve as before (single moveTo).
         const h00 = 2 * t ** 3 - 3 * t ** 2 + 1;
         const h10 = t ** 3 - 2 * t ** 2 + t;
         const h01 = -2 * t ** 3 + 3 * t ** 2;
@@ -180,7 +180,7 @@ export class Emulator extends Emitter {
         if (h.pointer) h.pos = { ...h.pointer };
         h.god = this._moveGod(h.index, h.god, h.pos);
       }
-      // Momentangeschwindigkeit mitführen (für die Anfangsgeschwindigkeit der nächsten Fahrt)
+      // Track the current velocity (initial velocity of the next move)
       h.vel = dt > 0 ? { x: (h.pos.x - before.x) / dt, y: (h.pos.y - before.y) / dt } : { x: 0, y: 0 };
     }
     this.emit(

@@ -5,16 +5,16 @@ import { dist, distToSegment, edges, shapeContains, rectPoints } from '../panto/
 import { uid } from './project.js';
 
 export const TOOLS = [
-  { key: 'select', label: 'Auswahl', hint: 'Objekte anklicken, verschieben, Eckpunkte ziehen. Entf löscht. Mausrad zoomt, leere Fläche ziehen verschiebt.', shortcut: 'V' },
-  { key: 'wall', label: 'Wand', hint: 'Punkte setzen. Doppelklick oder Enter beendet, Klick auf den ersten Punkt schließt die Form.', shortcut: 'W' },
-  { key: 'box', label: 'Kiste', hint: 'Rechteck aufziehen: eine geschlossene Wand.', shortcut: 'B' },
-  { key: 'rail', label: 'Schiene', hint: 'Punkte setzen (Hallway). Doppelklick oder Enter beendet.', shortcut: 'R' },
-  { key: 'zone', label: 'Zone', hint: 'Rechteck aufziehen: ein Bereich, der beim Betreten reagiert.', shortcut: 'Z' },
-  { key: 'zoneCircle', label: 'Zone rund', hint: 'Vom Mittelpunkt aus aufziehen.', shortcut: 'K' },
-  { key: 'enemy', label: 'Gegner', hint: 'Klicken setzt einen Gegner. Er wird angezeigt und reagiert, wenn Me ihn berührt. Im Skript: level.entity("Name").', shortcut: 'G' },
-  { key: 'item', label: 'Item', hint: 'Klicken setzt ein Item zum Einsammeln. Es verschwindet beim Berühren.', shortcut: 'I' },
-  { key: 'spawnMe', label: 'Start Me', hint: 'Klicken: hierhin fährt der Me-Griff beim Laden des Levels.', shortcut: '' },
-  { key: 'spawnIt', label: 'Start It', hint: 'Klicken: hierhin fährt der It-Griff beim Laden des Levels.', shortcut: '' },
+  { key: 'select', label: 'Select', hint: 'Click objects, move them, drag corner points. Delete removes. Mouse wheel zooms, dragging empty space pans.', shortcut: 'V' },
+  { key: 'wall', label: 'Wall', hint: 'Place points. Double-click or Enter finishes, clicking the first point closes the shape.', shortcut: 'W' },
+  { key: 'box', label: 'Box', hint: 'Drag a rectangle: a closed wall.', shortcut: 'B' },
+  { key: 'rail', label: 'Rail', hint: 'Place points (hallway). Double-click or Enter finishes.', shortcut: 'R' },
+  { key: 'zone', label: 'Zone', hint: 'Drag a rectangle: an area that reacts when entered.', shortcut: 'Z' },
+  { key: 'zoneCircle', label: 'Round zone', hint: 'Drag out from the centre.', shortcut: 'C' },
+  { key: 'enemy', label: 'Enemy', hint: 'Click to place an enemy. It is shown and reacts when Me touches it. In the script: level.entity("Name").', shortcut: 'E' },
+  { key: 'item', label: 'Item', hint: 'Click to place an item to collect. It disappears when touched.', shortcut: 'I' },
+  { key: 'spawnMe', label: 'Start Me', hint: 'Click: the Me handle moves here when the level loads.', shortcut: '' },
+  { key: 'spawnIt', label: 'Start It', hint: 'Click: the It handle moves here when the level loads.', shortcut: '' },
 ];
 
 export class LevelEditor {
@@ -46,7 +46,7 @@ export class LevelEditor {
     this.level = level;
     this.selectedId = null;
     this.draft = null;
-    // keep zoom and pan while switching between the "Level" and "Skript" tabs
+    // keep zoom and pan while switching between the "Level" and "Script" tabs
     if (changed) this.resetView();
     this.undoStack = [];
     this.redoStack = [];
@@ -355,7 +355,7 @@ export class LevelEditor {
       this.snapshot();
       const obj = {
         id: uid('o'), type: 'entity', kind: t, shape: 'circle',
-        name: this._name(t === 'enemy' ? 'Gegner' : 'Item'),
+        name: this._name(t === 'enemy' ? 'Enemy' : 'Item'),
         x: p.x, y: p.y, r: t === 'enemy' ? 12 : 10,
         speak: '', sound: '', solid: false, handle: 'me',
       };

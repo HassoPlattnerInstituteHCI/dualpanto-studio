@@ -19,7 +19,7 @@ export const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.
 export function toPoint(p) {
   if (Array.isArray(p)) return { x: +p[0], y: +p[1] };
   if (p && typeof p === 'object' && 'x' in p) return { x: +p.x, y: +p.y };
-  throw new TypeError('Punkt erwartet: {x, y} oder [x, y]');
+  throw new TypeError('Expected a point: {x, y} or [x, y]');
 }
 
 /** Closest point on segment ab to p, plus the parameter t in [0,1]. */

@@ -3,72 +3,72 @@
 
 export const API_DTS = `
 type Point = { x: number; y: number } | [number, number];
-/** Überall, wo ein Ziel erwartet wird: Punkt, Gegner/Item, Zone, Griff – oder eine Funktion, die einen Punkt liefert. */
+/** Wherever a target is expected: a point, enemy/item, zone, handle – or a function that returns a point. */
 type Target = Point | PantoEntity | PantoZone | PantoHandle | (() => Point);
 type Handles = 'both' | 'me' | 'it';
 
 interface FollowOptions {
-  /** Obergrenze in mm/s für die Anfahrt und für Sprünge des Ziels (Standard 120). */
+  /** Upper limit in mm/s for the approach and for jumps of the target (default 120). */
   speed?: number;
-  /** Drehung: eine Zahl, oder true für die Drehung des Ziels. */
+  /** Rotation: a number, or true for the target's rotation. */
   rotation?: number | true;
-  /** Aktualisierungen pro Sekunde (Standard 20). Weniger = weniger Pakete. */
+  /** Updates per second (default 20). Fewer = fewer packets. */
   hz?: number;
   /**
-   * Wie viele Update-Intervalle eine Fahrt dauert (Standard 2.5). Werte unter 1.5
-   * machen den Griff unruhig: jede Fahrt ist dann zu Ende, bevor das nächste Ziel
-   * kommt, und der Griff pulsiert mit der Update-Rate. Größer = ruhiger, träger.
+   * How many update intervals one move lasts (default 2.5). Values below 1.5 make
+   * the handle restless: every move ends before the next target arrives, and the
+   * handle pulses at the update rate. Larger = calmer, more sluggish.
    */
   ease?: number;
-  /** Glättung des Ziels 0..0.95 (Standard 0.25; ist das Ziel ein Griff: 0.6). */
+  /** Smoothing of the target 0..0.95 (default 0.25; if the target is a handle: 0.6). */
   smooth?: number;
-  /** Vorhalt: Anteil der Fahrtdauer, um den vorausgezielt wird (Standard 0.6). */
+  /** Lead: fraction of the move duration to aim ahead by (default 0.6). */
   lead?: number;
-  /** Erst senden, wenn sich das Ziel um so viele mm bewegt hat (Standard 1). */
+  /** Only send once the target has moved this many mm (default 1). */
   deadzone?: number;
 }
 
 interface PantoHandle {
-  /** Position, die die Person fühlt (God Object), in mm. */
+  /** Position the person feels (god object), in mm. */
   readonly position: { x: number; y: number };
-  /** Echte Griffposition (kann in einer Wand stecken). */
+  /** Actual handle position (can be inside a wall). */
   readonly handlePosition: { x: number; y: number };
   readonly x: number;
   readonly y: number;
-  /** Drehung des Griffs in Grad. */
+  /** Rotation of the handle in degrees. */
   readonly rotation: number;
-  /** true, solange das Programm den Griff bewegt. */
+  /** true while the program is moving the handle. */
   readonly isMoving: boolean;
   distanceTo(p: Target): number;
-  /** true, wenn der Griff den Punkt physisch erreichen kann. */
+  /** true if the handle can physically reach the point. */
   canReach(p: Target): boolean;
-  /** Umriss des Bereichs, den dieser Griff erreichen kann (mm). */
+  /** Outline of the area this handle can reach (mm). */
   readonly area: { x: number; y: number }[] | null;
-  /** Wird bei jeder Bewegung des Griffs aufgerufen. */
+  /** Called on every movement of the handle. */
   onMove(fn: (pos: { x: number; y: number }) => void): () => void;
-  /** Bewegt den Griff (speed in mm/s). Me wird danach freigegeben, It bleibt stehen (hold). */
+  /** Moves the handle (speed in mm/s). Me is released afterwards, It stays put (hold). */
   moveTo(p: Target, options?: { speed?: number; duration?: number; rotation?: number; hold?: boolean }): Promise<boolean>;
   /**
-   * Fährt zum Objekt und bleibt dann an ihm: bewegt sich das Objekt, fährt der Griff mit
-   * (wie SwitchTo im Unity-Toolkit). Das Promise erfüllt sich beim ersten Ankommen.
-   * Endet mit free(), freeze(), stopFollow() oder dem nächsten switchTo.
-   * hz = Aktualisierungen pro Sekunde (Standard 30), speed = Obergrenze in mm/s.
+   * Moves to the object and then stays on it: when the object moves, the handle moves
+   * along (like SwitchTo in the Unity toolkit). The promise resolves on first arrival.
+   * Ends with free(), freeze(), stopFollow() or the next switchTo.
+   * hz = updates per second (default 20), speed = upper limit in mm/s.
    */
   switchTo(target: Target, options?: FollowOptions): Promise<boolean>;
-  /** Gleiche Wirkung wie switchTo. */
+  /** Same as switchTo. */
   follow(target: Target, options?: FollowOptions): Promise<boolean>;
-  /** Beendet nur das Folgen; der Griff bleibt stehen. */
+  /** Only stops following; the handle stays where it is. */
   stopFollow(): this;
   readonly isFollowing: boolean;
-  /** Punkt, dem der Griff folgt, oder null. */
+  /** Point the handle is following, or null. */
   readonly followTarget: { x: number; y: number } | null;
-  /** Name des Objekts, dem gefolgt wird, oder null. */
+  /** Name of the object being followed, or null. */
   readonly followName: string | null;
-  /** Gibt der Person die Kontrolle zurück. */
+  /** Gives control back to the person. */
   free(): void;
-  /** Hält den Griff an seiner Position fest. */
+  /** Holds the handle at its position. */
   freeze(): void;
-  /** Drückt den Griff in eine Richtung, Stärke 0..1. */
+  /** Pushes the handle in a direction, strength 0..1. */
   applyForce(dir: Point, strength?: number): void;
   stopForce(): void;
 }
@@ -80,9 +80,9 @@ interface PantoObstacle {
 
 interface PantoZone {
   readonly name: string; readonly enabled: boolean; readonly center: { x: number; y: number };
-  /** Wird aufgerufen, wenn ein Griff die Zone betritt. */
+  /** Called when a handle enters the zone. */
   onEnter(fn: (handle: PantoHandle) => void): () => void;
-  /** Wird aufgerufen, wenn ein Griff die Zone verlässt. */
+  /** Called when a handle leaves the zone. */
   onExit(fn: (handle: PantoHandle) => void): () => void;
   contains(p: Point | PantoHandle): boolean;
   isInside(handle?: 'me' | 'it'): boolean;
@@ -94,62 +94,62 @@ type EntityKind = 'enemy' | 'item' | 'marker';
 interface PantoEntity {
   readonly name: string;
   readonly kind: EntityKind;
-  /** Mittelpunkt in mm. Zuweisen setzt das Objekt sofort dorthin. */
+  /** Centre in mm. Assigning puts the object there immediately. */
   position: { x: number; y: number };
   readonly x: number;
   readonly y: number;
-  /** Berührungsradius in mm. */
+  /** Touch radius in mm. */
   radius: number;
-  /** true, solange es sich bewegt (moveTo, patrol, follow). */
+  /** true while it is moving (moveTo, patrol, follow). */
   readonly isMoving: boolean;
-  /** false, wenn versteckt oder eingesammelt. */
+  /** false if hidden or collected. */
   readonly isVisible: boolean;
   readonly collected: boolean;
-  /** Fährt zum Punkt (speed in mm/s). Erfüllt sich beim Ankommen. */
+  /** Moves to the point (speed in mm/s). Resolves on arrival. */
   moveTo(p: Point | PantoEntity | PantoHandle, options?: { speed?: number; duration?: number }): Promise<boolean>;
   moveBy(dx: number, dy: number, options?: { speed?: number; duration?: number }): Promise<boolean>;
-  /** Setzt es ohne Animation an eine Stelle. */
+  /** Puts it somewhere without animation. */
   moveToNow(p: Point | PantoEntity | PantoHandle): this;
-  /** Läuft die Punkte immer wieder ab (pingpong: hin und zurück). */
+  /** Walks the points over and over (pingpong: back and forth). */
   patrol(points: Point[], options?: { speed?: number; loop?: boolean; pingpong?: boolean }): this;
-  /** Folgt einem Griff, einem anderen Objekt oder einem Punkt. */
+  /** Follows a handle, another object or a point. */
   follow(target: PantoHandle | PantoEntity | Point, options?: { speed?: number; distance?: number }): this;
-  /** Stoppt Bewegung und Verfolgung. */
+  /** Stops movement and following. */
   halt(): this;
-  /** Kurz für it.switchTo(entity): der Griff fährt hin und bleibt am Objekt. */
+  /** Shorthand for it.switchTo(entity): the handle moves there and stays on the object. */
   attachTo(handle?: 'it' | 'me', options?: { speed?: number; hz?: number }): this;
   detach(): this;
-  /** Runde Wand auf dem Gerät an- oder abschalten. */
+  /** Turns the round wall on the device on or off. */
   setSolid(on?: boolean): this;
   distanceTo(p: Point | PantoEntity | PantoHandle): number;
   touching(handle?: 'me' | 'it'): boolean;
-  /** Wird aufgerufen, wenn ein Griff das Objekt berührt. */
+  /** Called when a handle touches the object. */
   onTouch(fn: (handle: PantoHandle, entity: PantoEntity) => void): () => void;
   onLeave(fn: (handle: PantoHandle, entity: PantoEntity) => void): () => void;
-  /** Wird aufgerufen, wenn es eingesammelt wird (Items automatisch). */
+  /** Called when it is collected (automatically for items). */
   onCollect(fn: (handle: PantoHandle, entity: PantoEntity) => void): () => void;
-  /** Sammelt es ein: es verschwindet und reagiert nicht mehr. */
+  /** Collects it: it disappears and stops reacting. */
   collect(): this;
-  /** Holt ein verstecktes oder eingesammeltes Objekt zurück. */
+  /** Brings back a hidden or collected object. */
   reset(p?: Point): this;
   show(): this; hide(): this; enable(): this; disable(): this; remove(): void;
 }
 
 interface EntityOptions {
   x?: number; y?: number;
-  /** Berührungsradius in mm (Standard 10). */
+  /** Touch radius in mm (default 10). */
   r?: number;
   name?: string;
   kind?: EntityKind;
-  /** Wird beim Berühren gesagt. */
+  /** Spoken on touch. */
   speak?: string;
-  /** Dateiname eines hochgeladenen Sounds, wird beim Berühren gespielt. */
+  /** File name of an uploaded sound, played on touch. */
   sound?: string;
-  /** true: runde Wand auf dem Gerät, das Objekt ist fühlbar. */
+  /** true: round wall on the device, the object can be felt. */
   solid?: boolean;
-  /** Items: verschwinden beim Berühren (Standard true). */
+  /** Items: disappear on touch (default true). */
   vanish?: boolean;
-  /** Welcher Griff auslöst (Standard "me"). */
+  /** Which handle triggers it (default "me"). */
   handle?: 'me' | 'it' | 'both';
   enabled?: boolean;
   persistent?: boolean;
@@ -158,11 +158,11 @@ interface EntityOptions {
 interface PantoLevel {
   readonly name: string;
   readonly objects: Array<PantoObstacle | PantoZone | PantoEntity>;
-  /** Zone dieses Levels über ihren Namen aus dem Level-Editor. */
+  /** Zone of this level by its name from the level editor. */
   zone(name: string): PantoZone;
-  /** Gegner, Item oder Markierung über den Namen aus dem Level-Editor. */
+  /** Enemy, item or marker by its name from the level editor. */
   entity(name: string): PantoEntity;
-  /** Beliebiges Objekt dieses Levels über seinen Namen. */
+  /** Any object of this level by its name. */
   object(name: string): PantoObstacle | PantoZone | PantoEntity | null;
   zones(): PantoZone[];
   entities(kind?: EntityKind): PantoEntity[];
@@ -170,59 +170,59 @@ interface PantoLevel {
   items(): PantoEntity[];
 }
 
-interface ObjectOptions { name?: string; handles?: Handles; enabled?: boolean; /** bleibt bei Level-Wechseln erhalten */ persistent?: boolean }
+interface ObjectOptions { name?: string; handles?: Handles; enabled?: boolean; /** survives level changes */ persistent?: boolean }
 
 declare const panto: {
   readonly me: PantoHandle;
   readonly it: PantoHandle;
-  /** Das aktuell geladene Level. */
+  /** The currently loaded level. */
   readonly level: PantoLevel | null;
-  /** Namen aller Level des Projekts. */
+  /** Names of all levels of the project. */
   readonly levels: string[];
-  /** Größe der Arbeitsfläche in mm. */
+  /** Size of the working area in mm. */
   readonly width: number;
   readonly height: number;
   readonly device: 'emulator' | 'serial';
-  /** Erreichbarer Bereich eines Griffs. Me und It haben verschiedene Bereiche. */
+  /** Reachable area of a handle. Me and It have different areas. */
   area(handle?: 'me' | 'it'): { points: { x: number; y: number }[] | null; contains(p: Point | PantoHandle): boolean };
-  /** Kann der Griff (oder beide) den Punkt erreichen? */
+  /** Can the handle (or both) reach the point? */
   canReach(p: Point | PantoHandle, handle?: 'me' | 'it' | 'both'): boolean;
-  /** Wand entlang der Punkte. closed: true verbindet den letzten mit dem ersten Punkt. */
+  /** Wall along the points. closed: true connects the last point with the first. */
   wall(points: Point[], options?: ObjectOptions & { closed?: boolean; passable?: boolean }): PantoObstacle;
-  /** Rechteckige Wand. */
+  /** Rectangular wall. */
   box(x: number, y: number, w: number, h: number, options?: ObjectOptions & { passable?: boolean }): PantoObstacle;
-  /** Runde Wand. */
+  /** Round wall. */
   circle(x: number, y: number, r: number, options?: ObjectOptions & { passable?: boolean; corners?: number }): PantoObstacle;
-  /** Haptische Schiene („Hallway“). strength = Fangbreite in mm. */
+  /** Haptic rail ("hallway"). strength = capture width in mm. */
   rail(points: Point[], options?: ObjectOptions & { strength?: number }): PantoObstacle;
-  /** Unsichtbarer Bereich, der reagiert, wenn ein Griff ihn betritt. */
+  /** Invisible area that reacts when a handle enters it. */
   zone(shape: { x: number; y: number; w: number; h: number } | { x: number; y: number; r: number } | Point[],
        options?: { name?: string; speak?: string; handle?: 'me' | 'it' | 'both'; persistent?: boolean }): PantoZone;
-  /** Sichtbares Objekt: panto.entity(x, y, { … }) oder panto.entity({ x, y, … }). */
+  /** Visible object: panto.entity(x, y, { … }) or panto.entity({ x, y, … }). */
   entity(x: number, y: number, options?: EntityOptions): PantoEntity;
   entity(options: EntityOptions): PantoEntity;
-  /** Gegner (rotes Dreieck). Kurz für panto.entity(…, { kind: "enemy" }). */
+  /** Enemy (red triangle). Shorthand for panto.entity(…, { kind: "enemy" }). */
   enemy(x: number, y: number, options?: EntityOptions): PantoEntity;
   enemy(options: EntityOptions): PantoEntity;
-  /** Item zum Einsammeln (grüne Raute). */
+  /** Item to collect (green diamond). */
   item(x: number, y: number, options?: EntityOptions): PantoEntity;
   item(options: EntityOptions): PantoEntity;
-  /** Alle Entities der Szene, optional nach Art. */
+  /** All entities of the scene, optionally by kind. */
   entities(kind?: EntityKind): PantoEntity[];
-  /** Objekt der Szene über seinen Namen – geht auch im Haupt-Skript, wo es kein "level" gibt. */
+  /** Object of the scene by its name – also works in the main script, where there is no "level". */
   find(name: string): PantoObstacle | PantoZone | PantoEntity | null;
-  /** Alle Objekte der Szene, optional nach Typ. */
+  /** All objects of the scene, optionally by type. */
   objects(type?: 'wall' | 'rail' | 'zone' | 'entity'): Array<PantoObstacle | PantoZone | PantoEntity>;
   loadLevel(name: string): Promise<PantoLevel | null>;
   nextLevel(): Promise<PantoLevel | null>;
-  /** Ein Level nur im Code – ohne Eintrag im Level-Editor. */
+  /** A level in code only – without an entry in the level editor. */
   defineLevel(name: string, build: (level: PantoLevel) => void | Promise<void>,
               options?: { spawn?: { me?: Point; it?: Point }; intro?: string }): string;
-  /** Läuft in jedem Bild (ca. 60 mal pro Sekunde). dt = Sekunden seit dem letzten Bild. */
+  /** Runs every frame (about 60 times per second). dt = seconds since the last frame. */
   onFrame(fn: (dt: number, time: number) => void, options?: { persistent?: boolean }): () => void;
-  /** Sekunden seit dem Start. */
+  /** Seconds since start. */
   readonly time: number;
-  /** Führt fn jedes Mal aus, wenn das Level geladen wird. */
+  /** Runs fn every time the level is loaded. */
   onLevel(name: string, fn: (level: PantoLevel) => void): void;
   onLevel(fn: (level: PantoLevel) => void): void;
   onStop(fn: () => void): void;
@@ -230,7 +230,7 @@ declare const panto: {
 };
 declare const me: PantoHandle;
 declare const it: PantoHandle;
-/** Sprachausgabe. Das Promise erfüllt sich, wenn fertig gesprochen ist. */
+/** Speech output. The promise resolves when speaking is done. */
 declare function speak(text: string, options?: { interrupt?: boolean; lang?: string; rate?: number; pitch?: number }): Promise<void>;
 interface SoundHandle { stop(): void; readonly ended: Promise<void> }
 declare const sound: {
@@ -238,91 +238,91 @@ declare const sound: {
   tick(): Promise<void>;
   success(): Promise<void>;
   error(): Promise<void>;
-  /** Spielt einen hochgeladenen Sound über seinen Dateinamen, z. B. sound.play("treffer.wav"). */
+  /** Plays an uploaded sound by its file name, e.g. sound.play("hit.wav"). */
   play(name: string, options?: { volume?: number; loop?: boolean; rate?: number }): SoundHandle;
-  /** Lädt Sounds vorab, damit der erste Ton sofort kommt. */
+  /** Loads sounds in advance so the first one plays right away. */
   preload(...names: string[]): Promise<unknown>;
   stopAll(): void;
-  /** Dateinamen aller hochgeladenen Sounds. */
+  /** File names of all uploaded sounds. */
   readonly names: string[];
 };
-/** Führt fn einmal nach ms Millisekunden aus. Gibt eine Abbrechen-Funktion zurück. */
+/** Runs fn once after ms milliseconds. Returns a cancel function. */
 declare function after(ms: number, fn: () => void, options?: { persistent?: boolean }): () => void;
-/** Führt fn alle ms Millisekunden aus. Gibt eine Abbrechen-Funktion zurück. */
+/** Runs fn every ms milliseconds. Returns a cancel function. */
 declare function every(ms: number, fn: () => void, options?: { persistent?: boolean }): () => void;
-/** await wait(1000) wartet eine Sekunde. */
+/** await wait(1000) waits one second. */
 declare function wait(ms: number): Promise<void>;
-/** Tastatur, z. B. onKey("Enter", …), onKey("Space", …), onKey("a", …), onKey("*", …) */
+/** Keyboard, e.g. onKey("Enter", …), onKey("Space", …), onKey("a", …), onKey("*", …) */
 declare function onKey(key: string, fn: (key: string, event: KeyboardEvent) => void, options?: { persistent?: boolean }): () => void;
-/** Sprachbefehle, einfache Variante. listen(["start", "stopp"], (befehl) => …), listen(null, (text) => …) */
+/** Voice commands, simple variant. listen(["start", "stop"], (command) => …), listen(null, (text) => …) */
 declare function listen(commands: string[] | null, fn: (command: string, text: string) => void): () => void;
 
 /**
- * Spracheingabe (Chrome/Edge). Muster mit Platzhaltern statt Sprachmodell:
- *   "gehe zu {ziel}"        – {ziel} ist der Rest des Satzes
- *   "setze punkte {n:zahl}" – versteht "drei" und "3"
- *   "(start|starte) spiel"  – Alternativen
- *   "*"                     – alles, was zu keinem anderen Muster passt
- * Umlaute, Beugungen und Füllwörter werden toleriert.
+ * Voice input (Chrome/Edge). Patterns with placeholders instead of a language model:
+ *   "go to {target}"        – {target} is the rest of the sentence
+ *   "set score {n:number}"  – understands "three" and "3"
+ *   "(start|begin) game"    – alternatives
+ *   "*"                     – anything no other pattern matches
+ * Filler words, word endings and umlaut spellings are tolerated.
  */
 declare const voice: {
-  /** true in Chrome und Edge am Computer. */
+  /** true in Chrome and Edge on desktop. */
   readonly supported: boolean;
   /** "off" | "listening" | "paused" | "error" */
   readonly state: string;
   readonly isListening: boolean;
-  /** Der letzte erkannte Satz. */
+  /** The last recognised sentence. */
   readonly lastText: string;
-  /** Registriert einen Sprachbefehl. fn(platzhalter, originaltext). */
+  /** Registers a voice command. fn(placeholders, original text). */
   command(pattern: string, fn: (args: Record<string, any>, text: string) => void, options?: { persistent?: boolean }): () => void;
-  /** Mehrere auf einmal: voice.commands({ "start": fn, "stopp": fn }) */
+  /** Several at once: voice.commands({ "start": fn, "stop": fn }) */
   commands(map: Record<string, (args: Record<string, any>, text: string) => void>, options?: { persistent?: boolean }): () => void;
-  /** Jeder erkannte Satz, ohne Muster. */
-  onText(fn: (text: string, original: string, alternativen: string[]) => void, options?: { persistent?: boolean }): () => void;
-  /** Zwischenergebnis, noch während gesprochen wird. */
+  /** Every recognised sentence, without patterns. */
+  onText(fn: (text: string, original: string, alternatives: string[]) => void, options?: { persistent?: boolean }): () => void;
+  /** Interim result while the person is still speaking. */
   onPartial(fn: (text: string, original: string) => void, options?: { persistent?: boolean }): () => void;
   /**
-   * Stellt eine Frage, wartet auf die Antwort, gibt null zurück, wenn nichts verstanden wurde.
-   * expect: "text" (Standard), "zahl" oder eine Liste erlaubter Antworten.
+   * Asks a question, waits for the answer, returns null if nothing was understood.
+   * expect: "text" (default), "number" or a list of allowed answers.
    */
-  ask(question: string, options?: { expect?: 'text' | 'zahl' | string[]; timeout?: number; retries?: number; lang?: string }): Promise<any>;
-  /** Ja/Nein-Frage: true, false oder null. */
+  ask(question: string, options?: { expect?: 'text' | 'number' | string[]; timeout?: number; retries?: number; lang?: string }): Promise<any>;
+  /** Yes/no question: true, false or null. */
   confirm(question: string, options?: { timeout?: number; retries?: number }): Promise<boolean | null>;
-  /** Taste halten = zuhören. Verhindert Fehlauslöser durch die eigene Sprachausgabe. */
+  /** Hold a key = listen. Prevents false triggers from the program's own speech output. */
   pushToTalk(key?: string, options?: { persistent?: boolean }): () => void;
-  /** Startet das Mikrofon (passiert bei command/onText automatisch). local: Erkennung auf dem Gerät. */
+  /** Starts the microphone (happens automatically with command/onText). local: on-device recognition. */
   start(options?: { lang?: string; continuous?: boolean; interim?: boolean; local?: boolean; minScore?: number }): void;
   stop(): void;
   /** "available" | "downloadable" | "downloading" | "unavailable" | "unknown" */
   localAvailable(lang?: string): Promise<string>;
-  /** Lädt das Sprachpaket für die Erkennung ohne Server (einmal Internet nötig). */
+  /** Downloads the language pack for recognition without a server (needs internet once). */
   installLocal(lang?: string): Promise<boolean>;
-  /** So lange nach der eigenen Sprachausgabe gilt ein ähnlicher Satz als Echo (ms, Standard 1500). */
+  /** How long after the program's own speech a similar sentence counts as echo (ms, default 1500). */
   echoWindow: number;
 };
-/** "dreiundzwanzig" → 23, "3,5" → 3.5, sonst null. */
+/** "twenty-three" → 23, "3" → 3, otherwise null. */
 declare function parseNumber(text: string): number | null;
-/** Bester Treffer aus einer Liste, tolerant gegen Erkennungsfehler. */
+/** Best match from a list, tolerant of recognition errors. */
 declare function matchText<T>(text: string, options: T[], minScore?: number): { option: T; score: number } | null;
 declare function normalizeText(text: string): string;
 declare const ui: {
-  /** Haptische Liste: eine Schiene, jeder Eintrag rastet ein. Enter/Leertaste wählt aus. */
+  /** Haptic list: a rail, every item snaps in. Enter/Space selects. */
   menu<T>(items: T[], options?: {
     x?: number; y?: number; spacing?: number; width?: number; title?: string; strength?: number;
     moveHandle?: boolean; announceIndex?: boolean;
     onSelect?: (item: T, index: number, menu: any) => void;
     onFocus?: (item: T, index: number, menu: any) => void;
   }): { items: T[]; focused: number; length: number; select(i?: number): void; setItems(items: T[]): void; remove(): void };
-  /** Fragt nach einer Texteingabe (Tastatur). */
+  /** Asks for text input (keyboard). */
   prompt(question: string, defaultValue?: string): Promise<string | null>;
 };
-/** Dauerhafter Speicher im Browser (pro Projekt). */
+/** Persistent storage in the browser (per project). */
 declare const storage: { get<T = any>(key: string, fallback?: T): T; set(key: string, value: any): void; remove(key: string): void };
-/** Freies Objekt, dessen Werte über Level-Wechsel erhalten bleiben. */
+/** Free-form object whose values survive level changes. */
 declare const state: Record<string, any>;
 declare function log(...values: any[]): void;
 declare function random(min?: number, max?: number): number;
-/** Zufälliger Punkt, den der Griff erreicht (Standard: beide), mindestens margin mm vom Rand. */
+/** Random point the handle can reach (default: both), at least margin mm from the edge. */
 declare function randomPoint(margin?: number, handle?: 'me' | 'it' | 'both'): { x: number; y: number };
 declare function distance(a: Point | PantoHandle, b: Point | PantoHandle): number;
 `;
@@ -331,224 +331,224 @@ const code = (s) => `<pre><code>${s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 
 export const API_HTML = `
 <section>
-  <h3>Grundidee</h3>
-  <p>Ein Projekt besteht aus einem <b>Skript</b> und beliebig vielen <b>Leveln</b>. Level zeichnest du im Level-Editor (Wände, Schienen, Zonen), das Verhalten schreibst du im Skript. Alle Maße sind Millimeter; der Ursprung ist oben links, die Arbeitsfläche ist ${360}&nbsp;×&nbsp;${210}&nbsp;mm.</p>
-  <p><b>me</b> ist der Griff, den die Person führt. <b>it</b> ist der Griff, den dein Programm bewegt.</p>
-  <p>Beim Start läuft das Haupt-Skript einmal von oben nach unten, danach wird das Start-Level geladen. Jedes Level kann zusätzlich ein eigenes Skript haben.</p>
+  <h3>Basics</h3>
+  <p>A project consists of a <b>script</b> and any number of <b>levels</b>. You draw levels in the level editor (walls, rails, zones) and write the behaviour in the script. All measurements are millimetres; the origin is top left, the working area is ${360}&nbsp;×&nbsp;${210}&nbsp;mm.</p>
+  <p><b>me</b> is the handle the person moves. <b>it</b> is the handle your program moves.</p>
+  <p>On start, the main script runs once from top to bottom, then the start level is loaded. Every level can also have its own script.</p>
 </section>
 <section>
-  <h3>Haupt-Skript und Level-Skripte</h3>
-  <p>Es gibt ein <b>Haupt-Skript</b> und pro Level ein eigenes <b>Level-Skript</b> (Tab „Skript“, wenn ein Level geöffnet ist).</p>
-  <p>Das Haupt-Skript läuft einmal beim Start: Begrüßung, Spielstand, Tasten, die überall gelten, und das Umschalten zwischen Leveln. Das Level-Skript läuft jedes Mal, wenn genau dieses Level geladen wird. Dort ist <code>level</code> schon da, und alles, was es anlegt, wird beim Level-Wechsel automatisch aufgeräumt.</p>
-  ${code(`// Haupt-Skript
-state.punkte = 0;
-speak("Willkommen!");
-onKey("r", () => panto.loadLevel("Gang"));
+  <h3>Main script and level scripts</h3>
+  <p>There is one <b>main script</b> and one <b>level script</b> per level ("Script" tab when a level is open).</p>
+  <p>The main script runs once on start: greeting, score, keys that apply everywhere, and switching between levels. A level script runs every time exactly that level is loaded. There, <code>level</code> is already defined, and everything it creates is cleaned up automatically when the level changes.</p>
+  ${code(`// main script
+state.score = 0;
+speak("Welcome!");
+onKey("r", () => panto.loadLevel("Hallway"));
 
-// Level-Skript von "Gang"
-level.zone("Ausgang").onEnter(() => panto.nextLevel());
+// level script of "Hallway"
+level.zone("Exit").onEnter(() => panto.nextLevel());
 every(1000, () => log(me.position));`)}
-  <p>Reihenfolge beim Laden eines Levels: Objekte anlegen → Level-Skript → <code>panto.onLevel</code>-Funktionen aus dem Haupt-Skript → Griffe fahren zu den Startpunkten, Intro wird gesprochen.</p>
+  <p>Order when a level loads: create objects → level script → <code>panto.onLevel</code> functions from the main script → handles move to their start positions, the intro is spoken.</p>
 </section>
 <section>
-  <h3>Spielfeld</h3>
-  <p>Die Griffe erreichen nicht die ganze Fläche, und <b>Me</b> und <b>It</b> haben unterschiedliche Bereiche (gestrichelt: orange = Me, lila = It). Nur in der Mitte überschneiden sie sich. Der Rand des Me-Bereichs ist automatisch eine Wand. <code>moveTo</code> auf einen unerreichbaren Punkt fährt zum nächsten erreichbaren Punkt.</p>
+  <h3>Play area</h3>
+  <p>The handles cannot reach the whole area, and <b>Me</b> and <b>It</b> have different areas (dashed: orange = Me, purple = It). They only overlap in the middle. The edge of the Me area is automatically a wall. <code>moveTo</code> to an unreachable point moves to the nearest reachable point.</p>
   ${code(`me.canReach({x: 300, y: 60})      // false
-panto.canReach(p, "both")          // für Me und It erreichbar?
-randomPoint(15)                    // Punkt, den beide erreichen
-randomPoint(15, "me")              // nur Me
-panto.area("it").points            // Umriss als Punktliste`)}
-  <p>Beim Laden warnt die Konsole, wenn Zonen, Schienen oder Startpunkte außerhalb liegen. Wände dürfen über den Rand hinausragen.</p>
-  <p>Im Level-Editor zoomst du mit dem Mausrad zum Zeiger, verschiebst durch Ziehen auf leerer Fläche und holst mit <code>0</code> die ganze Fläche bzw. mit <code>F</code> die Auswahl zurück.</p>
+panto.canReach(p, "both")          // reachable for Me and It?
+randomPoint(15)                    // point both can reach
+randomPoint(15, "me")              // Me only
+panto.area("it").points            // outline as a list of points`)}
+  <p>When a level loads, the console warns if zones, rails or start positions are outside. Walls may stick out over the edge.</p>
+  <p>In the level editor, the mouse wheel zooms towards the pointer, dragging empty space pans, <code>0</code> shows the whole area and <code>F</code> zooms to the selection.</p>
 </section>
 <section>
-  <h3>Griffe</h3>
-  ${code(`me.position            // {x, y} – was die Person fühlt
+  <h3>Handles</h3>
+  ${code(`me.position            // {x, y} – what the person feels
 me.onMove(pos => log(pos))
 await it.moveTo({x: 180, y: 100}, { speed: 120 })  // mm/s
-await me.moveTo(zone.center)   // Me wird danach wieder freigegeben
+await me.moveTo(zone.center)   // Me is released again afterwards
 it.free(); it.freeze()
 me.distanceTo(it)`)}
-  <p>Als Ziel geht überall dasselbe: ein Punkt, ein Gegner oder Item, eine Zone, der andere Griff – oder eine Funktion, die einen Punkt liefert.</p>
+  <p>Targets work the same everywhere: a point, an enemy or item, a zone, the other handle – or a function that returns a point.</p>
 </section>
 <section>
-  <h3>Ein Griff hängt an einem Objekt</h3>
-  <p><code>switchTo</code> fährt den Griff zum Objekt und lässt ihn dann <b>daran hängen</b>: bewegt sich das Objekt, fährt der Griff mit. Das ist das Gegenstück zu <code>PantoHandle.SwitchTo</code> im Unity-Toolkit und der Weg, einen Gegner fühlbar zu machen – die Person ertastet ihn am It-Griff.</p>
-  ${code(`const gegner = level.entity("Wächter");
-gegner.patrol([[150, 80], [210, 140]], { speed: 60 });
+  <h3>Attaching a handle to an object</h3>
+  <p><code>switchTo</code> moves the handle to the object and then keeps it <b>attached</b>: when the object moves, the handle moves along. This is the counterpart to <code>PantoHandle.SwitchTo</code> in the Unity toolkit and the way to make an enemy tangible – the person feels it through the It handle.</p>
+  ${code(`const enemy = level.entity("Guard");
+enemy.patrol([[150, 80], [210, 140]], { speed: 60 });
 
-await it.switchTo(gegner);              // fährt hin, erfüllt sich beim Ankommen
-it.isFollowing   it.followName          // true, "Wächter"
-it.stopFollow();                        // bleibt stehen
-it.free();                              // loslassen (beendet das Folgen auch)
+await it.switchTo(enemy);               // moves there, resolves on arrival
+it.isFollowing   it.followName          // true, "Guard"
+it.stopFollow();                        // stays where it is
+it.free();                              // let go (also stops following)
 
-it.switchTo(level.zone("Ziel"));                       // Mittelpunkt der Zone
-it.switchTo(() => ({ x: 200, y: 110 + panto.time }));  // eigene Kurve
-me.switchTo(gegner);                                   // führt die Hand der Person mit`)}
-  <p>Am Gerät sind das ungefähr 17 Pakete pro Sekunde, solange sich das Ziel bewegt – das Unity-Toolkit schickt 50. Steht das Objekt still, wird nichts geschickt. Läuft das Ziel aus dem erreichbaren Bereich des Griffs, bleibt der Griff am nächsten erreichbaren Punkt und die Konsole sagt es einmal.</p>
-  <h4>Wenn der Griff unruhig läuft</h4>
-  <p>Die Firmware fährt das God Object in <code>1 / SPEED</code> Sekunden zum Ziel. Dauert eine Fahrt nur ein Update-Intervall, ist sie vorbei, bevor das nächste Ziel kommt – der Griff fährt in kleinen Stößen und pulsiert mit der Update-Rate. Deshalb dauert jede Fahrt standardmäßig <b>2,5 Intervalle</b> (<code>ease</code>), die Fahrten überlappen sich also; den Nachlauf gleicht ein <b>Vorhalt</b> aus (<code>lead</code>), und ein verrauschtes Ziel wird <b>geglättet</b> (<code>smooth</code>).</p>
-  ${code(`it.switchTo(gegner, {
-  speed: 150,     // Obergrenze mm/s – für die Anfahrt und für Sprünge
-  hz: 20,         // Aktualisierungen pro Sekunde
-  ease: 2.5,      // Fahrtdauer in Intervallen: größer = ruhiger, träger
-  smooth: 0.25,   // Glättung des Ziels (bei einem Griff als Ziel: 0.6)
-  lead: 0.6,      // Vorhalt gegen den Nachlauf
-  deadzone: 1,    // erst senden, wenn sich das Ziel 1 mm bewegt hat
+it.switchTo(level.zone("Goal"));                       // centre of the zone
+it.switchTo(() => ({ x: 200, y: 110 + panto.time }));  // your own curve
+me.switchTo(enemy);                                    // guides the person's hand`)}
+  <p>On the device this is about 17 packets per second while the target moves – the Unity toolkit sends 50. If the object stands still, nothing is sent. If the target leaves the handle's reachable area, the handle stays at the nearest reachable point and the console says so once.</p>
+  <h4>If the handle moves unevenly</h4>
+  <p>The firmware moves the god object to the target in <code>1 / SPEED</code> seconds. If a move lasts only one update interval, it is over before the next target arrives – the handle moves in small bursts and pulses at the update rate. So by default every move lasts <b>2.5 intervals</b> (<code>ease</code>) and the moves overlap; a <b>lead</b> (<code>lead</code>) compensates the lag, and a noisy target is <b>smoothed</b> (<code>smooth</code>).</p>
+  ${code(`it.switchTo(enemy, {
+  speed: 150,     // upper limit mm/s – for the approach and for jumps
+  hz: 20,         // updates per second
+  ease: 2.5,      // move duration in intervals: larger = calmer, more sluggish
+  smooth: 0.25,   // smoothing of the target (with a handle as target: 0.6)
+  lead: 0.6,      // lead against the lag
+  deadzone: 1,    // only send once the target has moved 1 mm
 });`)}
-  <p>Zuckt es trotzdem: <code>ease</code> auf 3–4 und <code>hz</code> auf 12–15. Hängt der Griff zu weit hinterher: <code>ease</code> kleiner (nicht unter 1.5) oder <code>lead</code> auf 1. Zappelt das Ziel (die Hand der Person, Sensorwerte): <code>smooth</code> auf 0.6–0.8.</p>
-  <p><code>entity.attachTo("it")</code> ist die Kurzform für <code>it.switchTo(entity)</code>.</p>
+  <p>Still twitching: raise <code>ease</code> to 3–4 and lower <code>hz</code> to 12–15. Handle lagging too far behind: lower <code>ease</code> (not below 1.5) or set <code>lead</code> to 1. Target jittering (the person's hand, sensor values): set <code>smooth</code> to 0.6–0.8.</p>
+  <p><code>entity.attachTo("it")</code> is shorthand for <code>it.switchTo(entity)</code>.</p>
 </section>
 <section>
-  <h3>Level</h3>
-  ${code(`panto.onLevel("Gang", (level) => {
-  level.zone("Ausgang").onEnter(() => panto.loadLevel("Schiene"));
+  <h3>Levels</h3>
+  ${code(`panto.onLevel("Hallway", (level) => {
+  level.zone("Exit").onEnter(() => panto.loadLevel("Rail"));
 });
-panto.loadLevel("Gang");   panto.nextLevel();
-panto.level.name           panto.levels   // alle Namen
-state.punkte = 0           // bleibt über Level hinweg erhalten`)}
-  <p>Zonen mit einem Text unter „Beim Betreten sagen“ sprechen automatisch.</p>
+panto.loadLevel("Hallway");   panto.nextLevel();
+panto.level.name              panto.levels   // all names
+state.score = 0               // survives level changes`)}
+  <p>Zones with a text under "Say on enter" speak automatically.</p>
 </section>
 <section>
-  <h3>Objekte im Code – jederzeit zur Laufzeit</h3>
-  <p>Der Level-Editor ist nur eine Abkürzung. <b>Alles</b> lässt sich im Skript anlegen, verändern und wieder entfernen – beim Start, in einem Timer, in <code>onFrame</code>, in der Reaktion auf eine Zone, auf eine Taste oder auf einen Sprachbefehl. Was entsteht, geht sofort an das Gerät (bzw. den Emulator) und erscheint in der Vorschau.</p>
-  ${code(`const tuer = panto.wall([[150, 60], [150, 140]], { name: "Tür" });
-panto.box(200, 95, 30, 25, { name: "Kiste" });
+  <h3>Objects in code – at any time while running</h3>
+  <p>The level editor is just a shortcut. <b>Everything</b> can be created, changed and removed in the script – on start, in a timer, in <code>onFrame</code>, in response to a zone, a key or a voice command. Whatever you create goes to the device (or emulator) immediately and shows up in the preview.</p>
+  ${code(`const door = panto.wall([[150, 60], [150, 140]], { name: "Door" });
+panto.box(200, 95, 30, 25, { name: "Box" });
 panto.circle(260, 120, 18);
 panto.rail([[140, 160], [280, 160]], { strength: 8 });
-const z = panto.zone({ x: 250, y: 60, r: 16 }, { name: "Ziel", speak: "Am Ziel" });
-const gegner = panto.enemy(170, 100, { name: "Feind" });
-const muenze = panto.item(230, 140, { name: "Münze" });
+const z = panto.zone({ x: 250, y: 60, r: 16 }, { name: "Goal", speak: "At the goal" });
+const enemy = panto.enemy(170, 100, { name: "Foe" });
+const coin = panto.item(230, 140, { name: "Coin" });
 
-tuer.disable();   tuer.enable();   tuer.remove();     // jederzeit
-after(2000, () => panto.box(120, 100, 20, 20));       // später nachlegen
+door.disable();   door.enable();   door.remove();     // at any time
+after(2000, () => panto.box(120, 100, 20, 20));       // add more later
 onKey("n", () => panto.circle(randomPoint(20).x, randomPoint(20).y, 12));
-z.onEnter(() => panto.enemy(randomPoint(20), { name: "Verstärkung" }));`)}
-  <p><b>Wiederfinden:</b> über den Namen, egal ob gezeichnet oder im Code angelegt.</p>
-  ${code(`level.object("Tür");  level.zone("Ziel");  level.entity("Feind");
+z.onEnter(() => panto.enemy(randomPoint(20), { name: "Reinforcement" }));`)}
+  <p><b>Finding objects again:</b> by name, whether drawn or created in code.</p>
+  ${code(`level.object("Door");  level.zone("Goal");  level.entity("Foe");
 level.items();  level.enemies();  level.zones();
-panto.find("Feind");       // geht auch im Haupt-Skript, wo es kein "level" gibt
-panto.objects("wall");     // alle Wände der Szene`)}
-  <p><b>Aufräumen</b> passiert automatisch und hängt davon ab, <i>wo</i> etwas angelegt wird: im <b>Level-Skript</b> gehört es zum Level und verschwindet beim Level-Wechsel; im <b>Haupt-Skript</b> bleibt es über Level hinweg stehen. <code>{ persistent: true }</code> macht ein Objekt auch aus einem Level-Skript dauerhaft. Beim Stopp wird alles entfernt.</p>
-  <p><code>handles: "me"</code> oder <code>"it"</code> lässt ein Hindernis nur für einen Griff gelten.</p>
-  <p><b>Am echten Gerät kostet jedes Hindernis Pakete:</b> eine Wand ist ein CREATE, ein Paket pro Punkt und ein ENABLE, und zwischen zwei solchen Paketen liegen 10&nbsp;ms. Eine Linie aus 2 Punkten braucht so ungefähr 40&nbsp;ms, ein <code>panto.circle</code> mit 16 Ecken knapp 200&nbsp;ms. Für etwas, das sich oft ändert, ist es deshalb besser, die Hindernisse <b>einmal anzulegen und nur ein- und auszuschalten</b> (je ein Paket) statt sie ständig neu zu erzeugen. Zonen und Entities kosten gar nichts – die rechnet das Studio selbst.</p>
+panto.find("Foe");         // also works in the main script, where there is no "level"
+panto.objects("wall");     // all walls of the scene`)}
+  <p><b>Cleanup</b> happens automatically and depends on <i>where</i> something is created: in a <b>level script</b> it belongs to the level and disappears when the level changes; in the <b>main script</b> it stays across levels. <code>{ persistent: true }</code> makes an object from a level script permanent too. On stop, everything is removed.</p>
+  <p><code>handles: "me"</code> or <code>"it"</code> makes an obstacle apply to one handle only.</p>
+  <p><b>On the real device, every obstacle costs packets:</b> a wall is one CREATE, one packet per point and one ENABLE, with 10&nbsp;ms between two such packets. A line with 2 points takes about 40&nbsp;ms, a <code>panto.circle</code> with 16 corners almost 200&nbsp;ms. For something that changes often it is better to <b>create obstacles once and just enable and disable them</b> (one packet each) instead of creating them over and over. Zones and entities cost nothing – the Studio computes them itself.</p>
 </section>
 <section>
-  <h3>Gegner, Items &amp; eigene Objekte</h3>
-  <p>Ein <b>Entity</b> ist ein sichtbares Objekt in der Szene: ein Gegner (rotes Dreieck), ein Item (grüne Raute) oder eine Markierung. Entities hängen <b>nicht</b> am Gerät – sie werden im Level-Editor und in der Vorschau gezeichnet und reagieren, wenn der Me-Griff in ihren Radius kommt. Das reicht für Spiele mit Ton- und Sprachausgabe.</p>
-  <p>Im Level-Editor setzt du sie mit den Werkzeugen <b>Gegner</b> (G) und <b>Item</b> (I) und gibst ihnen einen Namen. Im Skript holst du sie über diesen Namen:</p>
-  ${code(`const gegner = level.entity("Gegner 1");
-gegner.patrol([[140, 80], [260, 80]], { speed: 40 });   // hin und her
-gegner.onTouch(() => speak("Erwischt!"));
+  <h3>Enemies, items &amp; custom objects</h3>
+  <p>An <b>entity</b> is a visible object in the scene: an enemy (red triangle), an item (green diamond) or a marker. Entities are <b>not</b> attached to the device – they are drawn in the level editor and the preview and react when the Me handle comes within their radius. That is enough for games with sound and speech output.</p>
+  <p>In the level editor you place them with the <b>Enemy</b> (E) and <b>Item</b> (I) tools and give them a name. In the script you get them by that name:</p>
+  ${code(`const enemy = level.entity("Enemy 1");
+enemy.patrol([[140, 80], [260, 80]], { speed: 40 });   // back and forth
+enemy.onTouch(() => speak("Caught!"));
 
 level.entity("Item 1").onCollect(() => {
-  state.punkte = (state.punkte ?? 0) + 1;
-  speak(\`\${state.punkte} von \${level.items().length}\`);
+  state.score = (state.score ?? 0) + 1;
+  speak(\`\${state.score} of \${level.items().length}\`);
 });
 
-level.items()      // alle Items   level.enemies()   level.entities()`)}
-  <p>Genauso gut legst du sie im Code an – dann brauchst du den Editor gar nicht:</p>
-  ${code(`const muenze = panto.item(200, 80, { name: "Münze", r: 12, speak: "Münze!" });
-const jaeger = panto.enemy(140, 70, { r: 14 });
-jaeger.follow(me, { speed: 30 });          // verfolgt den Me-Griff
-const ziel  = panto.entity({ x: 270, y: 150, name: "Ziel" });
+level.items()      // all items   level.enemies()   level.entities()`)}
+  <p>You can just as well create them in code – then you don't need the editor at all:</p>
+  ${code(`const coin = panto.item(200, 80, { name: "Coin", r: 12, speak: "Coin!" });
+const hunter = panto.enemy(140, 70, { r: 14 });
+hunter.follow(me, { speed: 30 });          // chases the Me handle
+const goal = panto.entity({ x: 270, y: 150, name: "Goal" });
 
-await muenze.moveTo({ x: 160, y: 150 }, { speed: 80 });
-muenze.moveToNow(randomPoint(15));         // ohne Animation
-muenze.collect();  muenze.reset();         // einsammeln / zurückholen
-jaeger.halt();  jaeger.hide();  jaeger.remove();
-muenze.position   muenze.radius = 16   muenze.distanceTo(me)   muenze.touching()`)}
-  <p><b>Fühlbar machen</b> – zwei Wege, beide optional:</p>
+await coin.moveTo({ x: 160, y: 150 }, { speed: 80 });
+coin.moveToNow(randomPoint(15));           // without animation
+coin.collect();  coin.reset();             // collect / bring back
+hunter.halt();  hunter.hide();  hunter.remove();
+coin.position   coin.radius = 16   coin.distanceTo(me)   coin.touching()`)}
+  <p><b>Making them tangible</b> – two ways, both optional:</p>
   <ul>
-    <li><code>solid: true</code> (oder <code>setSolid()</code>) legt eine runde Wand an. Bewegte Objekte überträgt die Runtime am Gerät erst beim Anhalten – ein Hindernis neu zu senden kostet Pakete.</li>
-    <li><code>attachTo("it")</code> schickt den It-Griff dauernd zum Objekt. Damit kann die Person es direkt ertasten, z. B. den Gegner, der sie jagt.</li>
+    <li><code>solid: true</code> (or <code>setSolid()</code>) creates a round wall. On the device, the runtime only re-sends moving objects when they stop – sending an obstacle again costs packets.</li>
+    <li><code>attachTo("it")</code> keeps sending the It handle to the object. That way the person can feel it directly, e.g. the enemy chasing them.</li>
   </ul>
-  ${code(`panto.enemy(150, 90, { name: "Wächter", solid: true });
-level.entity("Wächter").attachTo("it");   // It fährt mit
-level.entity("Wächter").detach();`)}
-  <p>Ohne eine Zeile Code gilt: ein Item verschwindet beim Berühren und piept, ein Gegner brummt. Ein Text unter „Beim Berühren sagen“ wird gesprochen, ein gewählter Sound abgespielt.</p>
+  ${code(`panto.enemy(150, 90, { name: "Guard", solid: true });
+level.entity("Guard").attachTo("it");   // It moves along
+level.entity("Guard").detach();`)}
+  <p>Without a single line of code: an item disappears and beeps when touched, an enemy buzzes. A text under "Say on touch" is spoken, a selected sound is played.</p>
 </section>
 <section>
-  <h3>Eigene Level im Code</h3>
-  <p>Wer lieber programmiert, baut Level komplett im Skript – zufällig erzeugt, aus Daten, oder beliebig viele hintereinander. <code>panto.defineLevel</code> macht so ein Level unter einem Namen bekannt, danach funktioniert <code>panto.loadLevel</code> wie bei gezeichneten Leveln.</p>
+  <h3>Levels in code</h3>
+  <p>If you prefer programming, you can build levels entirely in the script – randomly generated, from data, or as many as you like in a row. <code>panto.defineLevel</code> registers such a level under a name; after that, <code>panto.loadLevel</code> works as with drawn levels.</p>
   ${code(`panto.defineLevel("Arena", (level) => {
-  panto.box(170, 95, 35, 28, { name: "Kiste" });
-  for (let i = 0; i < 5; i++) panto.item(randomPoint(20), { name: "Münze " + i });
-  const jaeger = panto.enemy(randomPoint(20), { name: "Jäger", r: 14 });
-  jaeger.follow(me, { speed: 25 });
-  jaeger.onTouch(() => panto.loadLevel("Arena"));   // neuer Versuch
+  panto.box(170, 95, 35, 28, { name: "Box" });
+  for (let i = 0; i < 5; i++) panto.item(randomPoint(20), { name: "Coin " + i });
+  const hunter = panto.enemy(randomPoint(20), { name: "Hunter", r: 14 });
+  hunter.follow(me, { speed: 25 });
+  hunter.onTouch(() => panto.loadLevel("Arena"));   // try again
 
-  panto.onFrame((dt) => {                            // eigene Spiellogik
-    if (!level.items().some((it) => it.isVisible)) speak("Alles eingesammelt!");
+  panto.onFrame((dt) => {                           // your own game logic
+    if (!level.items().some((it) => it.isVisible)) speak("All collected!");
   });
-}, { spawn: { me: { x: 130, y: 80 } }, intro: "Arena. Sammle die Münzen." });
+}, { spawn: { me: { x: 130, y: 80 } }, intro: "Arena. Collect the coins." });
 
 panto.loadLevel("Arena");
-panto.time        // Sekunden seit dem Start`)}
-  <p><code>panto.onFrame(fn)</code> läuft etwa 60 mal pro Sekunde; <code>dt</code> ist die Zeit seit dem letzten Bild in Sekunden – gut für eigene Bewegungen, Timer und Kollisionen. Alles, was im Builder angelegt wird, räumt die Runtime beim Level-Wechsel wieder auf.</p>
+panto.time        // seconds since start`)}
+  <p><code>panto.onFrame(fn)</code> runs about 60 times per second; <code>dt</code> is the time since the last frame in seconds – good for your own movements, timers and collisions. Everything created in the builder is cleaned up by the runtime when the level changes.</p>
 </section>
 <section>
-  <h3>Ausgabe &amp; Eingabe</h3>
-  ${code(`await speak("Hallo");   speak("Sofort", { interrupt: true });
+  <h3>Output &amp; input</h3>
+  ${code(`await speak("Hello");   speak("Right now", { interrupt: true });
 sound.beep(440, 150);   sound.tick();   sound.success();
 onKey("Enter", () => …);  onKey("Space", …);  onKey("n", …)
-listen(["start", "stopp"], (cmd) => …)    // Spracheingabe
-const name = await ui.prompt("Wie heißt du?");`)}
+listen(["start", "stop"], (cmd) => …)    // voice input
+const name = await ui.prompt("What's your name?");`)}
 </section>
 <section>
-  <h3>Spracheingabe</h3>
-  <p>Das Mikrofon gibt es in Chrome und Edge am Computer – denselben Browsern wie Web Serial. Oben rechts steht, ob gerade zugehört wird; ein Klick darauf schaltet es an und aus. Beim ersten Mal fragt der Browser nach der Erlaubnis.</p>
-  <p>Interpretiert wird mit <b>Mustern</b>, nicht mit einem Sprachmodell. Platzhalter <code>{name}</code> holen Teile des Satzes heraus, <code>{name:zahl}</code> macht daraus eine Zahl (<code>„dreiundzwanzig“</code> → <code>23</code>), runde Klammern erlauben Alternativen. Füllwörter, Beugungen („startet“ statt „start“) und Umlaut-Schreibweisen werden toleriert.</p>
-  ${code(`voice.command("(start|starte|los) spiel", () => panto.loadLevel("Arena"));
-voice.command("gehe zu {ziel}", ({ ziel }) => speak("Ich suche " + ziel));
-voice.command("setze punkte {n:zahl}", ({ n }) => state.punkte = n);
-voice.command("*", ({ text }) => log("nicht verstanden: " + text));   // Auffangmuster
+  <h3>Voice input</h3>
+  <p>The microphone is available in Chrome and Edge on desktop – the same browsers as Web Serial. The top right shows whether the program is listening; clicking it turns it on and off. The first time, the browser asks for permission. Recognition uses the project language (<code>en-US</code> for new projects).</p>
+  <p>Interpretation uses <b>patterns</b>, not a language model. Placeholders <code>{name}</code> extract parts of the sentence, <code>{name:number}</code> turns them into a number (<code>"twenty-three"</code> → <code>23</code>), round brackets allow alternatives. Filler words, word endings ("starting" instead of "start") and umlaut spellings are tolerated.</p>
+  ${code(`voice.command("(start|begin|go) game", () => panto.loadLevel("Arena"));
+voice.command("go to {target}", ({ target }) => speak("Looking for " + target));
+voice.command("set score {n:number}", ({ n }) => state.score = n);
+voice.command("*", ({ text }) => log("not understood: " + text));   // catch-all
 
-voice.onText((text) => log("gehört: " + text));      // jeder Satz
-voice.onPartial((text) => …);                        // schon während des Sprechens
+voice.onText((text) => log("heard: " + text));       // every sentence
+voice.onPartial((text) => …);                        // already while speaking
 voice.lastText     voice.isListening     voice.state`)}
-  <p><b>Fragen stellen</b> – besser als <code>ui.prompt</code>, wenn niemand die Tastatur sieht. Die Frage wird gesprochen, danach wird zugehört; ohne Antwort kommt <code>null</code> zurück.</p>
-  ${code(`const text  = await voice.ask("Wie heißt die Aufgabe?");
-const punkte = await voice.ask("Wie viele Punkte?", { expect: "zahl" });
-const farbe  = await voice.ask("Welche Farbe?", { expect: ["rot", "grün", "blau"] });
-if (await voice.confirm("Wirklich löschen?")) …
-const egal = await ui.askVoice("Name?");   // Sprache, sonst Tastatur`)}
-  <p><b>Zwei Fallen</b>, die wir abgefangen haben:</p>
+  <p><b>Asking questions</b> – better than <code>ui.prompt</code> when nobody sees the keyboard. The question is spoken, then the program listens; with no answer you get <code>null</code>.</p>
+  ${code(`const text  = await voice.ask("What is the task called?");
+const score = await voice.ask("How many points?", { expect: "number" });
+const color = await voice.ask("Which colour?", { expect: ["red", "green", "blue"] });
+if (await voice.confirm("Really delete?")) …
+const any   = await ui.askVoice("Name?");   // voice, otherwise keyboard`)}
+  <p><b>Two pitfalls</b> we handle for you:</p>
   <ul>
-    <li><b>Das Programm spricht selbst.</b> Das Mikrofon hört <code>speak()</code> mit. Ergebnisse, die während oder bis <code>voice.echoWindow</code> ms nach der eigenen Ausgabe kommen und ihr ähnlich sind, werden verworfen (im Geräte-Log sichtbar). Ganz sicher ist <b>Push-to-talk</b>: <code>voice.pushToTalk("v")</code> – Taste halten und sprechen.</li>
-    <li><b>Die Erkennung läuft in Chrome über einen Server</b>, das Audio geht also ins Netz und offline geht nichts. <code>voice.localAvailable()</code> sagt, ob dieser Browser auf dem Gerät erkennen kann; <code>voice.installLocal()</code> lädt das Sprachpaket, danach bleibt mit <code>voice.start({ local: true })</code> alles auf dem Rechner. Beim Start steht in der Konsole, was hier gilt.</li>
+    <li><b>The program speaks itself.</b> The microphone hears <code>speak()</code>. Results that arrive during or up to <code>voice.echoWindow</code> ms after the program's own output and resemble it are dropped (visible in the device log). The safest option is <b>push-to-talk</b>: <code>voice.pushToTalk("v")</code> – hold the key and speak.</li>
+    <li><b>In Chrome, recognition runs on a server</b>, so the audio goes over the network and nothing works offline. <code>voice.localAvailable()</code> tells you whether this browser can recognise on the device; <code>voice.installLocal()</code> downloads the language pack, after which <code>voice.start({ local: true })</code> keeps everything on the computer. On start, the console says what applies here.</li>
   </ul>
-  <p>Hilfsfunktionen außerhalb von Mustern: <code>parseNumber("fünfundzwanzig")</code>, <code>matchText(text, ["ja", "nein"])</code>, <code>normalizeText(text)</code>. Die alte, einfache Form <code>listen(["start", "stopp"], fn)</code> funktioniert weiter.</p>
+  <p>Helpers outside of patterns: <code>parseNumber("twenty-five")</code>, <code>matchText(text, ["yes", "no"])</code>, <code>normalizeText(text)</code>. The old, simple form <code>listen(["start", "stop"], fn)</code> keeps working.</p>
 </section>
 <section>
   <h3>Sounds</h3>
-  <p>In der Seitenleiste unter „Sounds“ lädst du MP3- oder WAV-Dateien hoch (oder ziehst sie hinein). Im Skript sprichst du sie über ihren Dateinamen an. Ein Klick auf den Namen in der Liste fügt die passende Zeile ins offene Skript ein.</p>
-  ${code(`sound.play("treffer.wav");
-const musik = sound.play("hintergrund.mp3", { volume: 0.3, loop: true });
-musik.stop();
-await sound.play("gong.wav").ended;     // warten, bis der Ton zu Ende ist
-await sound.preload("treffer.wav");     // vorher laden, dann ohne Verzögerung
-sound.stopAll();   sound.names          // alle hochgeladenen Dateinamen`)}
-  <p>Die Dateien liegen im Browser (IndexedDB), nicht auf einem Server. Beim Export des Projekts kommen sie in die Projektdatei mit, beim Stopp werden laufende Sounds beendet.</p>
+  <p>In the sidebar under "Sounds" you upload MP3 or WAV files (or drag them in). In the script you refer to them by file name. Clicking a name in the list inserts the matching line into the open script.</p>
+  ${code(`sound.play("hit.wav");
+const music = sound.play("background.mp3", { volume: 0.3, loop: true });
+music.stop();
+await sound.play("gong.wav").ended;     // wait until the sound is over
+await sound.preload("hit.wav");         // load in advance, then no delay
+sound.stopAll();   sound.names          // all uploaded file names`)}
+  <p>The files are stored in the browser (IndexedDB), not on a server. When you export the project they are included in the project file; on stop, playing sounds are ended.</p>
 </section>
 <section>
-  <h3>Zeit</h3>
-  ${code(`after(1000, () => speak("Eine Sekunde später"));
+  <h3>Time</h3>
+  ${code(`after(1000, () => speak("One second later"));
 const stop = every(500, () => …);  stop();
 await wait(2000);`)}
 </section>
 <section>
-  <h3>Apps: Menüs &amp; Listen</h3>
-  ${code(`const menu = ui.menu(["Neu", "Öffnen", "Beenden"], {
-  title: "Hauptmenü", y: 40, spacing: 30,
-  onSelect: (item, i) => speak(item + " gewählt"),
+  <h3>Apps: menus &amp; lists</h3>
+  ${code(`const menu = ui.menu(["New", "Open", "Quit"], {
+  title: "Main menu", y: 40, spacing: 30,
+  onSelect: (item, i) => speak(item + " selected"),
 });
 menu.setItems([...]);   menu.focused   menu.remove();
-storage.set("notizen", liste);   storage.get("notizen", [])`)}
-  <p>Das Menü legt eine Schiene an, auf der jeder Eintrag einrastet und angesagt wird. Enter oder Leertaste wählt aus.</p>
+storage.set("notes", list);   storage.get("notes", [])`)}
+  <p>The menu creates a rail on which every item snaps in and is announced. Enter or Space selects.</p>
 </section>
 <section>
   <h3>Emulator</h3>
-  <p>Ohne Gerät: <b>Me</b> mit der Maus ziehen, <b>It</b> mit Shift&nbsp;+&nbsp;Ziehen oder rechter Maustaste. Der gefüllte Kreis ist das „God Object“ (was die Person fühlt), der gestrichelte Kreis die echte Griffposition.</p>
+  <p>Without a device: drag <b>Me</b> with the mouse, <b>It</b> with Shift&nbsp;+&nbsp;drag or the right mouse button. The filled circle is the "god object" (what the person feels), the dashed circle is the actual handle position.</p>
 </section>
 `;

@@ -298,7 +298,7 @@ function drawZone(ctx, o, c, px, opts) {
 }
 
 function drawHandle(ctx, h, color, px) {
-  // Verbindung zum Objekt, an dem der Griff hängt (switchTo/follow)
+  // Line to the object the handle is attached to (switchTo/follow)
   if (h.followTo) {
     ctx.strokeStyle = hexA(color, 0.75);
     ctx.setLineDash([px(2), px(4)]);

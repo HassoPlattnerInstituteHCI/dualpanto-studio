@@ -74,12 +74,12 @@ export class SerialDevice extends Emitter {
 
   // ---- connection -------------------------------------------------------
   async connect() {
-    if (!SerialDevice.isSupported()) throw new Error('Web Serial wird von diesem Browser nicht unterstützt (Chrome oder Edge nutzen).');
+    if (!SerialDevice.isSupported()) throw new Error('Web Serial is not supported by this browser (use Chrome or Edge).');
     this.port = await navigator.serial.requestPort();
     await this.port.open({ baudRate: BAUD_RATE, bufferSize: 8192 });
     this.openedAt = performance.now();
     this.emit('status', 'opened');
-    this._log('info', 'Port geöffnet, warte auf SYNC vom Gerät …');
+    this._log('info', 'Port opened, waiting for SYNC from the device …');
 
     if (this.resetOnConnect) {
       try {
@@ -89,9 +89,9 @@ export class SerialDevice extends Emitter {
         await this.port.setSignals({ requestToSend: false });
         this.bootSeen = false;
         this.openedAt = performance.now();
-        this._log('info', 'Gerät per DTR/RTS neu gestartet.');
+        this._log('info', 'Device restarted via DTR/RTS.');
       } catch (e) {
-        this._log('warn', 'Reset über DTR/RTS nicht möglich: ' + e.message);
+        this._log('warn', 'Reset via DTR/RTS not possible: ' + e.message);
       }
     }
 
@@ -101,7 +101,7 @@ export class SerialDevice extends Emitter {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         off();
-        reject(new Error('Kein SYNC vom Gerät innerhalb von 8 s. Gerät aus- und wieder einschalten und erneut verbinden.'));
+        reject(new Error('No SYNC from the device within 8 s. Switch the device off and on again and reconnect.'));
       }, 8000);
       const off = this.on('connected', () => {
         clearTimeout(timeout);
@@ -137,7 +137,7 @@ export class SerialDevice extends Emitter {
           if (value) this.parser.push(value);
         }
       } catch (e) {
-        if (!this._stopReading) this._log('error', 'Lesefehler: ' + e.message);
+        if (!this._stopReading) this._log('error', 'Read error: ' + e.message);
       } finally {
         this.reader.releaseLock();
       }
@@ -145,7 +145,7 @@ export class SerialDevice extends Emitter {
     if (!this._stopReading) {
       this.connected = false;
       this.emit('status', 'disconnected');
-      this._log('error', 'Verbindung zum Gerät verloren.');
+      this._log('error', 'Lost connection to the device.');
     }
   }
 
@@ -155,7 +155,7 @@ export class SerialDevice extends Emitter {
       case MSG.SYNC: {
         const rev = view.byteLength >= 4 ? view.getUint32(0, false) : -1;
         if (rev !== REVISION) {
-          this._log('error', `Protokoll-Revision passt nicht: erwartet ${REVISION}, Gerät meldet ${rev}. Firmware aktualisieren.`);
+          this._log('error', `Protocol revision mismatch: expected ${REVISION}, device reports ${rev}. Update the firmware.`);
           return;
         }
         // A SYNC that was still buffered from before the reset would be acknowledged
@@ -168,7 +168,7 @@ export class SerialDevice extends Emitter {
           if (performance.now() - this.connectedAt < SYNC_STALE_MS) return;
           // A SYNC long after connecting means the device rebooted (e.g. heartbeat timeout):
           // it has lost all obstacles and expects packet id 1 again.
-          this._log('warn', 'Gerät hat neu gestartet – Hindernisse werden neu übertragen.');
+          this._log('warn', 'Device restarted – obstacles are being sent again.');
           this._writeRaw(build.syncAck());
           this.connectedAt = performance.now();
           this.nextPacketId = 1;
@@ -184,7 +184,7 @@ export class SerialDevice extends Emitter {
           this.connected = true;
           this.connectedAt = performance.now();
           this.nextPacketId = 1;
-          this._log('info', 'Verbunden mit DualPanto (Protokoll-Revision ' + rev + ').');
+          this._log('info', 'Connected to DualPanto (protocol revision ' + rev + ').');
           this.emit('status', 'connected');
           this.emit('connected');
           this._pump();
@@ -242,7 +242,7 @@ export class SerialDevice extends Emitter {
           this._countAck(this.inflight.packet[2]);
           this.inflight = null;
         } else {
-          this._log('warn', `Paket-ID korrigiert (${received} → ${expected}), Paket wird wiederholt.`);
+          this._log('warn', `Packet ID corrected (${received} → ${expected}), resending packet.`);
           const packet = this.inflight.packet;
           this.inflight = null;
           this.trackedQueue.unshift(packet);
@@ -265,7 +265,7 @@ export class SerialDevice extends Emitter {
         this._invalidData = (this._invalidData ?? 0) + 1;
         if (!this._invalidTimer) {
           this._invalidTimer = setTimeout(() => {
-            this._log('warn', `Gerät meldet ungültige Daten (${this._invalidData}×). Bitte melden, welches Skript/Level das auslöst.`);
+            this._log('warn', `Device reports invalid data (${this._invalidData}×). Please report which script/level triggers this.`);
             this._invalidData = 0;
             this._invalidTimer = null;
           }, 1000);
@@ -295,7 +295,7 @@ export class SerialDevice extends Emitter {
     if (!this.writer) return;
     this._writeChain = this._writeChain
       .then(() => this.writer.write(bytes))
-      .catch((e) => this._log('error', 'Schreibfehler: ' + e.message));
+      .catch((e) => this._log('error', 'Write error: ' + e.message));
   }
 
   /** Untracked packets (motor etc.) are only sent while connected. */
@@ -329,13 +329,13 @@ export class SerialDevice extends Emitter {
     const send = () => {
       if (!this.inflight || this.inflight.bytes !== bytes) return;
       if (this.inflight.retries++ > TRACKED_MAX_RETRIES) {
-        this._log('error', 'Gerät bestätigt Paket nicht, verwerfe es.');
+        this._log('error', 'Device does not acknowledge the packet, dropping it.');
         this.inflight = null;
         this._pump();
         return;
       }
       if (this.verbose) {
-        this._log('device', `→ ${typeName(packet[2])} id ${id}${this.inflight.retries > 1 ? ' (Wiederholung)' : ''}`);
+        this._log('device', `→ ${typeName(packet[2])} id ${id}${this.inflight.retries > 1 ? ' (retry)' : ''}`);
       }
       this._writeRaw(bytes);
       this.inflight.timer = setTimeout(send, TRACKED_RESEND_MS);
@@ -357,15 +357,15 @@ export class SerialDevice extends Emitter {
     this._stats = null;
     if (!s) return;
     const parts = [];
-    if (s.created) parts.push(`${s.created} angelegt`);
-    if (s.enabled) parts.push(`${s.enabled} aktiviert`);
-    if (s.disabled) parts.push(`${s.disabled} deaktiviert`);
-    if (s.removed) parts.push(`${s.removed} entfernt`);
-    if (parts.length) this._log('info', `Hindernisse bestätigt: ${parts.join(', ')}.`);
+    if (s.created) parts.push(`${s.created} created`);
+    if (s.enabled) parts.push(`${s.enabled} enabled`);
+    if (s.disabled) parts.push(`${s.disabled} disabled`);
+    if (s.removed) parts.push(`${s.removed} removed`);
+    if (parts.length) this._log('info', `Obstacles acknowledged: ${parts.join(', ')}.`);
   }
 
   _log(level, text) {
-    this.emit('log', { level, text: '[Gerät] ' + text });
+    this.emit('log', { level, text: '[Device] ' + text });
   }
 
   // ---- device interface -------------------------------------------------

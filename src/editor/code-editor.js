@@ -98,10 +98,10 @@ function monacoEditor(monaco, container, { onChange, typeDefs, dark }) {
     kind: 'monaco',
     open(key, value = '') {
       const m = modelFor(key, value);
-      // Inhalt immer nachziehen, auch wenn dieses Dokument schon offen ist: beim
-      // Projektwechsel heißt das Haupt-Skript wieder "main", und früher blieb dann
-      // der Text des alten Projekts stehen (und wurde von syncScripts zurück-
-      // geschrieben, womit das neue Skript verloren war).
+      // Always update the content, even if this document is already open: after a
+      // project switch the main script is called "main" again, and previously the
+      // old project's text stayed (and was written back by syncScripts, which lost
+      // the new script).
       if (value != null && m.getValue() !== value) {
         const pos = key === current ? editor.getPosition() : null;
         silent = true;
@@ -132,7 +132,7 @@ function monacoEditor(monaco, container, { onChange, typeDefs, dark }) {
       states.delete(key);
       if (current === key) current = null;
     },
-    /** Alles vergessen – beim Wechsel auf ein anderes Projekt. */
+    /** Forget everything – when switching to another project. */
     reset() {
       for (const m of models.values()) m.dispose();
       models.clear();
@@ -165,7 +165,7 @@ function textareaEditor(container, { onChange }) {
   const ta = document.createElement('textarea');
   ta.className = 'code-editor';
   ta.spellcheck = false;
-  ta.setAttribute('aria-label', 'Skript');
+  ta.setAttribute('aria-label', 'Script');
   const values = new Map();
   let current = null;
   ta.addEventListener('input', () => {
@@ -185,7 +185,7 @@ function textareaEditor(container, { onChange }) {
   container.appendChild(ta);
   const note = document.createElement('div');
   note.className = 'code-note';
-  note.textContent = 'Einfacher Editor (Monaco konnte nicht geladen werden – offline?).';
+  note.textContent = 'Simple editor (Monaco could not be loaded – offline?).';
   container.appendChild(note);
   return {
     kind: 'textarea',

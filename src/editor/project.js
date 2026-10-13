@@ -20,7 +20,7 @@ export function normalize(p) {
   const project = {
     version: FORMAT_VERSION,
     id: p.id ?? uid('p'),
-    name: p.name ?? 'Unbenannt',
+    name: p.name ?? 'Untitled',
     script: p.script ?? '',
     levels: (p.levels ?? []).map((l) => ({
       id: l.id ?? uid('l'),
@@ -33,7 +33,7 @@ export function normalize(p) {
     startLevel: p.startLevel ?? null,
     // sounds: metadata only, the audio data itself lives in IndexedDB (assets.js)
     assets: (p.assets ?? []).map((a) => ({ id: a.id, name: a.name, type: a.type ?? '', size: a.size ?? 0, created: a.created ?? Date.now() })),
-    settings: { lang: 'de-DE', device: 'ember', boundary: false, ...(p.settings ?? {}) },
+    settings: { lang: 'en-US', device: 'ember', boundary: false, ...(p.settings ?? {}) },
     // level id -> file name inside the project folder (only set for folder projects)
     folderSlugs: p.folderSlugs ?? {},
     created: p.created ?? Date.now(),
@@ -81,14 +81,14 @@ export async function exportProject(project) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (project.name || 'projekt').replace(/[^\w\-äöüÄÖÜß ]+/g, '').trim().replace(/\s+/g, '-') + '.dualpanto.json';
+  a.download = (project.name || 'project').replace(/[^\w\-äöüÄÖÜß ]+/g, '').trim().replace(/\s+/g, '-') + '.dualpanto.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 export async function importProjectFile(file) {
   const data = JSON.parse(await file.text());
-  if (!data || typeof data !== 'object' || typeof data.script !== 'string') throw new Error('Keine gültige DualPanto-Projektdatei.');
+  if (!data || typeof data !== 'object' || typeof data.script !== 'string') throw new Error('Not a valid DualPanto project file.');
   const id = uid('p');
   const assets = await importAssets(id, data.assets ?? []);
   return normalize({ ...data, id, assets });
@@ -96,9 +96,9 @@ export async function importProjectFile(file) {
 
 /** Starter content for a new level script. */
 export function levelScriptTemplate(name) {
-  return `// Skript für Level „${name}“. Läuft jedes Mal, wenn das Level geladen wird.
-// "level" ist dieses Level, z. B. level.zone("Ziel").
-// Alles, was hier angelegt wird, räumt die Runtime beim Level-Wechsel wieder auf.
+  return `// Script for level "${name}". Runs every time the level is loaded.
+// "level" is this level, e.g. level.zone("Goal").
+// Everything created here is cleaned up by the runtime when the level changes.
 
 `;
 }

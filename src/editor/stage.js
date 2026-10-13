@@ -30,7 +30,7 @@ export class Stage {
     });
   }
 
-  /** Zeigt an, wenn ein Griff gerade an einem Objekt hängt (switchTo/follow). */
+  /** Shows when a handle is currently attached to an object (switchTo/follow). */
   _withFollow(rt) {
     return this.handles.map((h, i) => {
       const handle = rt?.handles?.[i];
