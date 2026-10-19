@@ -115,9 +115,19 @@
         </div>
         <div class="spacer"></div>
         <div id="level-opts" class="level-opts" hidden>
+          <div class="view-group" role="group" aria-label="Editor view">
+            <label class="view-label" for="select-view">View</label>
+            <select id="select-view" class="select-view" title="Choose editor view preset">
+              <option value="square" title="The biggest square covered by the range of the Me and It handle (83 × 83 mm)" selected>Biggest square (Me & It)</option>
+              <option value="both" title="The whole area covered by both the Me and It handle (172 × 160 mm)">Covered by both (Me & It)</option>
+              <option value="single" title="Maximum zoom with areas reached by only one of the handles (277 × 177 mm)">Single handles (max zoom)</option>
+              <option value="full" title="Full workspace (360 × 210 mm)">Full workspace</option>
+              <option value="custom" disabled hidden>Custom view</option>
+            </select>
+          </div>
           <div class="zoom-group" role="group" aria-label="Zoom">
             <button id="btn-zoom-out" class="icon-btn" title="Zoom out (−)" aria-label="Zoom out">−</button>
-            <button id="btn-zoom-level" class="zoom-value" title="Show the whole area (0)">100 %</button>
+            <button id="btn-zoom-level" class="zoom-value" title="Reset view (1 for square, 0 for full area)">100 %</button>
             <button id="btn-zoom-in" class="icon-btn" title="Zoom in (+)" aria-label="Zoom in">＋</button>
             <button id="btn-zoom-fit" class="icon-btn" title="Zoom to selection (F)" aria-label="Zoom to selection">⤢</button>
           </div>

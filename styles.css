@@ -310,6 +310,15 @@ body.is-running .stage-wrap { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* ---------- center head extras ---------- */
 .level-opts { display: flex; align-items: center; gap: 8px; }
+.view-group { display: flex; align-items: center; gap: 6px; }
+.view-label { font-size: 11.5px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.select-view {
+  height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--panel-2); color: var(--fg); font-size: 12.5px; font-weight: 550;
+  cursor: pointer; outline: none;
+}
+.select-view:hover { background: var(--panel); border-color: var(--border-strong); }
+.select-view:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
 .zoom-group { display: flex; align-items: center; gap: 1px; padding: 2px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); }
 .zoom-value {
   min-width: 52px; height: 24px; border: 0; background: transparent; cursor: pointer;

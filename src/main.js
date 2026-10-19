@@ -253,6 +253,9 @@ function showView() {
   }
   if (level && app.subtab === 'level') {
     app.levelEditor.setLevel(level);
+    const viewVal = app.levelEditor.viewMode || level.view || 'square';
+    const sel = $('#select-view');
+    if (sel) sel.value = viewVal;
     renderProps(null);
     requestAnimationFrame(() => app.levelEditor.draw());
   } else {
@@ -263,7 +266,7 @@ function showView() {
 
 function addLevel() {
   const name = uniqueLevelName(app.project);
-  const level = { id: uid('l'), name, intro: '', spawn: {}, objects: [], script: levelScriptTemplate(name) };
+  const level = { id: uid('l'), name, intro: '', spawn: {}, objects: [], script: levelScriptTemplate(name), view: 'square' };
   app.project.levels.push(level);
   scheduleSave();
   selectView(level.id);
@@ -686,9 +689,22 @@ function renderProps(obj) {
         ? h('span', { class: 'spawn-row' }, `${Math.round(sp[k].x)}, ${Math.round(sp[k].y)} mm `,
           h('button', { class: 'link-btn', onclick: () => { ed.snapshot(); delete level.spawn[k]; ed.changed(); renderProps(null); } }, 'remove'))
         : h('span', { class: 'muted' }, 'not set – tool "Start ' + (k === 'me' ? 'Me' : 'It') + '"');
+    const viewSel = h('select', {}, [
+      ['square', 'Biggest square (Me & It)'],
+      ['both', 'Covered by both (Me & It)'],
+      ['single', 'Single handles (max zoom)'],
+      ['full', 'Full workspace (360 × 210 mm)'],
+    ].map(([v, l]) => h('option', { value: v, selected: (level.view ?? 'square') === v }, l)));
+    viewSel.addEventListener('change', () => {
+      app.levelEditor.setViewMode(viewSel.value);
+      const sel = $('#select-view');
+      if (sel) sel.value = viewSel.value;
+      scheduleSave();
+    });
     panel.append(
       h('h3', {}, 'Level'),
       field('Name', name, 'Use this name to load the level in the script.'),
+      field('Workspace view', viewSel, 'Presets: biggest square, both handles, single handles, full area.'),
       field('Say on load', intro),
       h('label', { class: 'check' }, start, 'Load when the program starts'),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Start Me'), spawnInfo('me')),
@@ -1133,9 +1149,16 @@ async function init() {
     onSelect: (obj) => renderProps(obj),
   });
   app.levelEditor.onToolShortcut = setTool;
-  app.levelEditor.onViewChange = (zoom) => {
+  app.levelEditor.onViewChange = (zoom, mode) => {
     $('#btn-zoom-level').textContent = `${Math.round(zoom * 100)} %`;
+    const sel = $('#select-view');
+    if (sel && mode) sel.value = mode;
   };
+  $('#select-view').addEventListener('change', (e) => {
+    app.levelEditor.setViewMode(e.target.value);
+    scheduleSave();
+    if (!app.levelEditor.selected) renderProps(null);
+  });
   $('#btn-zoom-in').addEventListener('click', () => app.levelEditor.zoomBy(1.25));
   $('#btn-zoom-out').addEventListener('click', () => app.levelEditor.zoomBy(1 / 1.25));
   $('#btn-zoom-level').addEventListener('click', () => app.levelEditor.resetView());

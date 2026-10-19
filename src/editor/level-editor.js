@@ -3,6 +3,7 @@
 import { fitView, drawWorld } from './renderer.js';
 import { dist, distToSegment, edges, shapeContains, rectPoints } from '../panto/geometry.js';
 import { uid } from './project.js';
+import { EDITOR_VIEWS } from '../panto/areas.js';
 
 export const TOOLS = [
   { key: 'select', label: 'Select', hint: 'Click objects, move them, drag corner points. Delete removes. Mouse wheel zooms, dragging empty space pans.', shortcut: 'V' },
@@ -37,8 +38,15 @@ export class LevelEditor {
     this.zoom = 1; // 1 = whole working area fits
     this.pan = { x: 0, y: 0 };
     this.spaceDown = false;
+    this.viewMode = 'square';
     this._bind();
-    new ResizeObserver(() => this.draw()).observe(canvas);
+    new ResizeObserver(() => {
+      if (this.viewMode && this.viewMode !== 'custom' && this.viewMode !== 'full' && EDITOR_VIEWS[this.viewMode]) {
+        this.zoomToBox(EDITOR_VIEWS[this.viewMode].box);
+      } else {
+        this.draw();
+      }
+    }).observe(canvas);
   }
 
   setLevel(level) {
@@ -47,20 +55,26 @@ export class LevelEditor {
     this.selectedId = null;
     this.draft = null;
     // keep zoom and pan while switching between the "Level" and "Script" tabs
-    if (changed) this.resetView();
+    if (changed) {
+      const mode = level?.view || 'square';
+      this.setViewMode(mode);
+    }
     this.undoStack = [];
     this.redoStack = [];
     this.onSelect?.(null);
     this.draw();
   }
 
-  /** Keyboard shortcuts for zoom, also usable when the canvas has no focus. */
+  /** Keyboard shortcuts for zoom and views, also usable when the canvas has no focus. */
   handleViewKey(e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return false;
     const k = e.key;
     if (k === '+' || k === '=') return this.zoomBy(1.25), true;
     if (k === '-' || k === '_') return this.zoomBy(1 / 1.25), true;
-    if (k === '0') return this.resetView(), true;
+    if (k === '0') return this.setViewMode('full'), true;
+    if (k === '1') return this.setViewMode('square'), true;
+    if (k === '2') return this.setViewMode('both'), true;
+    if (k === '3') return this.setViewMode('single'), true;
     if (k.toLowerCase() === 'f') return this.zoomToFit(), true;
     return false;
   }
@@ -106,6 +120,45 @@ export class LevelEditor {
     return { x: ox - cx, y: oy - cy };
   }
 
+  /** Zooms to fit an arbitrary bounding box in world mm. */
+  zoomToBox(box, margin = 24) {
+    const { w, h } = this.canvasSize;
+    if (!w || !h) return;
+    const base = this._baseScale();
+    const scale2 = Math.min(8 * base, Math.max(0.5 * base, Math.min((w - margin * 2) / box.w, (h - margin * 2) / box.h)));
+    this.zoom = scale2 / base;
+    const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+    this.pan = this._clampPan(scale2, {
+      x: w / 2 - center.x * scale2 - (w - this.bounds.width * scale2) / 2,
+      y: h / 2 - center.y * scale2 - (h - this.bounds.height * scale2) / 2,
+    });
+    this.onViewChange?.(this.zoom, this.viewMode);
+    this.draw();
+  }
+
+  /** Switches between editor view presets: square, both, single, full, custom. */
+  setViewMode(mode) {
+    if (!EDITOR_VIEWS[mode]) {
+      if (mode === 'custom') {
+        this.viewMode = 'custom';
+        this.onViewChange?.(this.zoom, this.viewMode);
+        return;
+      }
+      mode = 'square';
+    }
+    this.viewMode = mode;
+    if (this.level) this.level.view = mode;
+
+    if (mode === 'full') {
+      this.zoom = 1;
+      this.pan = { x: 0, y: 0 };
+      this.onViewChange?.(this.zoom, this.viewMode);
+      this.draw();
+    } else {
+      this.zoomToBox(EDITOR_VIEWS[mode].box);
+    }
+  }
+
   /** Zooms so that the world point under `screen` stays where it is. */
   zoomAt(zoom, screen) {
     const next = Math.min(8, Math.max(0.5, zoom));
@@ -122,7 +175,8 @@ export class LevelEditor {
     };
     this.zoom = next;
     this.pan = this._clampPan(scale2, pan);
-    this.onViewChange?.(this.zoom);
+    this.viewMode = 'custom';
+    this.onViewChange?.(this.zoom, this.viewMode);
     this.draw();
   }
 
@@ -131,10 +185,7 @@ export class LevelEditor {
   }
 
   resetView() {
-    this.zoom = 1;
-    this.pan = { x: 0, y: 0 };
-    this.onViewChange?.(this.zoom);
-    this.draw();
+    this.setViewMode(this.level?.view || 'square');
   }
 
   /** Zooms onto the selected object, or onto everything in the level. */
@@ -155,18 +206,14 @@ export class LevelEditor {
     const xs = pts.map((p) => p.x);
     const ys = pts.map((p) => p.y);
     const pad = 12;
-    const box = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 };
-    const { w, h } = this.canvasSize;
-    const base = this._baseScale();
-    const scale2 = Math.min(8 * base, Math.max(0.5 * base, Math.min(w / box.w, h / box.h)));
-    this.zoom = scale2 / base;
-    const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
-    this.pan = this._clampPan(scale2, {
-      x: w / 2 - center.x * scale2 - (w - this.bounds.width * scale2) / 2,
-      y: h / 2 - center.y * scale2 - (h - this.bounds.height * scale2) / 2,
-    });
-    this.onViewChange?.(this.zoom);
-    this.draw();
+    const box = {
+      x: Math.min(...xs) - pad,
+      y: Math.min(...ys) - pad,
+      w: Math.max(...xs) - Math.min(...xs) + pad * 2,
+      h: Math.max(...ys) - Math.min(...ys) + pad * 2,
+    };
+    this.viewMode = 'custom';
+    this.zoomToBox(box);
   }
 
   // ---- history ------------------------------------------------------------
@@ -381,7 +428,11 @@ export class LevelEditor {
       if (d.kind === 'pan') {
         const dx = e.clientX - d.start.x;
         const dy = e.clientY - d.start.y;
-        if (Math.hypot(dx, dy) > 3) d.moved = true;
+        if (Math.hypot(dx, dy) > 3) {
+          d.moved = true;
+          this.viewMode = 'custom';
+          this.onViewChange?.(this.zoom, this.viewMode);
+        }
         this.pan = this._clampPan(this.view.scale, { x: d.pan.x + dx, y: d.pan.y + dy });
         this.draw();
         return;
@@ -512,7 +563,7 @@ export class LevelEditor {
   draw() {
     if (!this.canvas.clientWidth) return;
     this.view = fitView(this.canvas, this.bounds, 24, { zoom: this.zoom, pan: this.pan });
-    const scene = { objects: this.level?.objects ?? [], spawn: this.level?.spawn, areas: this.areas };
+    const scene = { objects: this.level?.objects ?? [], spawn: this.level?.spawn, areas: this.areas, viewMode: this.viewMode };
     if (this.draft) scene.draft = [...this.draft.points, ...(this.hover ? [this.hover] : [])];
     const d = this.drag;
     if (d?.kind === 'create') {
@@ -526,7 +577,7 @@ export class LevelEditor {
           : { type: 'zone', shape: 'rect', x, y, w, h }];
       }
     }
-    drawWorld(this.ctx, this.view, scene, { selectedId: this.selectedId, showVertices: true });
+    drawWorld(this.ctx, this.view, scene, { selectedId: this.selectedId, showVertices: true, viewMode: this.viewMode });
     // rect/circle resize handles
     const s = this.selected;
     if ((s?.type === 'zone' || s?.type === 'entity') && (s.shape === 'rect' || s.shape === 'circle')) {

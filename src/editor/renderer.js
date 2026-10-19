@@ -2,6 +2,7 @@
 // the level editor so both look the same.
 
 import { edges, shapeCenter } from '../panto/geometry.js';
+import { EDITOR_VIEWS } from '../panto/areas.js';
 
 export function cssVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -104,6 +105,55 @@ export function drawWorld(ctx, view, scene, opts = {}) {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+  }
+
+  // Active view preset boundary indicator
+  const viewMode = opts.viewMode ?? scene.viewMode;
+  if (viewMode === 'square') {
+    const sq = EDITOR_VIEWS.square.box;
+    ctx.save();
+    ctx.fillStyle = hexA(c.select, 0.03);
+    ctx.fillRect(sq.x, sq.y, sq.w, sq.h);
+    ctx.setLineDash([px(5), px(4)]);
+    ctx.strokeStyle = hexA(c.select, 0.85);
+    ctx.lineWidth = px(1.5);
+    ctx.strokeRect(sq.x, sq.y, sq.w, sq.h);
+    ctx.setLineDash([]);
+    ctx.strokeStyle = c.select;
+    ctx.lineWidth = px(2.5);
+    const blen = px(10);
+    ctx.beginPath();
+    // top-left
+    ctx.moveTo(sq.x, sq.y + blen); ctx.lineTo(sq.x, sq.y); ctx.lineTo(sq.x + blen, sq.y);
+    // top-right
+    ctx.moveTo(sq.x + sq.w - blen, sq.y); ctx.lineTo(sq.x + sq.w, sq.y); ctx.lineTo(sq.x + sq.w, sq.y + blen);
+    // bottom-right
+    ctx.moveTo(sq.x + sq.w, sq.y + sq.h - blen); ctx.lineTo(sq.x + sq.w, sq.y + sq.h); ctx.lineTo(sq.x + sq.w - blen, sq.y + sq.h);
+    // bottom-left
+    ctx.moveTo(sq.x + blen, sq.y + sq.h); ctx.lineTo(sq.x, sq.y + sq.h); ctx.lineTo(sq.x, sq.y + sq.h - blen);
+    ctx.stroke();
+    if (opts.labels !== false) label(ctx, 'Biggest Square (83 × 83 mm)', sq.x + sq.w / 2, sq.y - px(6), c.select, px);
+    ctx.restore();
+  } else if (viewMode === 'both') {
+    const b = EDITOR_VIEWS.both.box;
+    ctx.save();
+    ctx.setLineDash([px(5), px(4)]);
+    ctx.strokeStyle = hexA(c.zone, 0.75);
+    ctx.lineWidth = px(1.5);
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.setLineDash([]);
+    if (opts.labels !== false) label(ctx, 'Covered by both (172 × 160 mm)', b.x + b.w / 2, b.y - px(6), c.zone, px);
+    ctx.restore();
+  } else if (viewMode === 'single') {
+    const b = EDITOR_VIEWS.single.box;
+    ctx.save();
+    ctx.setLineDash([px(5), px(4)]);
+    ctx.strokeStyle = hexA(c.muted, 0.75);
+    ctx.lineWidth = px(1.5);
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.setLineDash([]);
+    if (opts.labels !== false) label(ctx, 'Max zoom · single handles (277 × 177 mm)', b.x + b.w / 2, b.y - px(6), c.muted, px);
+    ctx.restore();
   }
 
   // zones first (background)

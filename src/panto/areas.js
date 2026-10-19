@@ -17,3 +17,37 @@ const ME = [[176.4,6.2],[170.9,14.2],[164.4,21.7],[157.1,28.7],[149.1,34.9],[140
 const IT = [[183.6,6.2],[189.1,14.2],[195.6,21.7],[202.9,28.7],[210.9,34.9],[219.8,40.3],[229.3,44.8],[239.4,48.1],[250.1,50.2],[261.4,51.0],[273.1,50.3],[271.2,60.6],[268.5,70.6],[265.2,80.5],[261.2,90.1],[256.4,99.5],[251.0,108.7],[244.9,117.7],[238.1,126.5],[230.6,135.1],[222.5,143.6],[213.7,151.5],[204.3,158.7],[194.3,165.0],[183.7,170.5],[172.6,175.0],[161.0,178.6],[148.8,181.1],[136.3,182.6],[123.3,183.0],[109.8,182.2],[105.9,181.9],[101.7,181.6],[97.4,181.0],[92.8,179.8],[88.0,177.9],[83.1,175.0],[77.9,170.9],[72.6,165.3],[67.0,158.0],[61.2,148.7],[55.9,138.4],[51.6,128.2],[48.2,118.2],[45.6,108.6],[43.7,99.5],[42.5,91.0],[41.8,83.3],[41.5,76.5],[41.5,70.8],[41.8,66.2],[62.2,74.7],[81.8,78.3],[100.3,77.6],[117.4,73.2],[133.0,65.9],[146.8,56.2],[158.5,44.9],[167.9,32.6],[174.8,19.9]];
 
 export const EMBER_AREAS = { me: pts(ME), it: pts(IT) };
+
+/**
+ * Standard editor view presets:
+ * - square: The biggest square covered by the range of both Me and It handles (83 × 83 mm).
+ * - both: The whole area covered by both Me and It handles (172 × 160 mm).
+ * - single: Maximum zoom containing the areas reached by only one of the handles (277 × 177 mm).
+ * - full: Full device workspace (360 × 210 mm).
+ */
+export const EDITOR_VIEWS = {
+  square: {
+    key: 'square',
+    label: 'Biggest square (Me & It)',
+    title: 'The biggest square covered by the range of the Me and It handle (83 × 83 mm)',
+    box: { x: 138.7, y: 61.9, w: 82.6, h: 82.6 },
+  },
+  both: {
+    key: 'both',
+    label: 'Covered by both (Me & It)',
+    title: 'The whole area covered by both the Me and It handle (172 × 160 mm)',
+    box: { x: 93.9, y: 11.8, w: 172.2, h: 160.2 },
+  },
+  single: {
+    key: 'single',
+    label: 'Single handles (max zoom)',
+    title: 'Maximum zoom with areas reached by only one of the handles (277 × 177 mm)',
+    box: { x: 41.5, y: 6.2, w: 277.0, h: 176.8 },
+  },
+  full: {
+    key: 'full',
+    label: 'Full workspace (360 × 210 mm)',
+    title: 'Full workspace (360 × 210 mm)',
+    box: { x: 0, y: 0, w: 360, h: 210 },
+  },
+};
