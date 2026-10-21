@@ -82,15 +82,43 @@ export class Handle {
         }. The handle moves to the nearest reachable point.`
       );
     }
+    // _pos is refreshed from device position packets. Use it instead of the
+    // user-facing god position, which can be displaced by walls/constraints.
     const d = dist(this._pos, target);
     const dur = duration ?? Math.max(0.3, d / Math.max(1, speed));
     if (this._transition) this._transition.resolve(false); // superseded
-    rt.device.setSpeed(this.index, Math.min(100, 1 / dur));
-    rt.device.moveHandle(this.index, target, rotation);
     return new Promise((resolve) => {
+      const tolerance = 2; // mm; small enough to catch overshoot, above sensor noise
+      const maxCorrections = 3;
       const t = {
+        target,
+        corrections: 0,
+        settledSamples: 0,
+        timer: null,
+        checkPosition: () => {
+          if (this._transition !== t || t.corrections === 0) return;
+          t.settledSamples = dist(this._pos, t.target) <= tolerance ? t.settledSamples + 1 : 0;
+          // Some devices do not emit transitionEnded for a retargeted move.
+          // Require two in-tolerance position reports to avoid resolving on a
+          // single sample as the handle passes through the target.
+          if (t.settledSamples >= 2) t.resolve(true);
+        },
         resolve: (arrived) => {
           if (this._transition !== t) return;
+          if (arrived !== false && dist(this._pos, t.target) > tolerance) {
+            if (t.corrections >= maxCorrections) {
+              t.resolve(false);
+              return;
+            }
+            t.corrections++;
+            t.settledSamples = 0;
+            // Keep the already configured speed and send the correction directly.
+            // setSpeed is a separate serial packet and adds a visible gap here.
+            rt.device.moveHandle(this.index, t.target, rotation);
+            clearTimeout(t.timer);
+            t.timer = null;
+            return;
+          }
           clearTimeout(t.timer);
           this._transition = null;
           if (!hold && arrived !== false) rt.device.free(this.index);
@@ -99,6 +127,8 @@ export class Handle {
       };
       t.timer = setTimeout(() => t.resolve(true), dur * 1000 + 2000);
       this._transition = t;
+      rt.device.setSpeed(this.index, Math.min(100, 1 / dur));
+      rt.device.moveHandle(this.index, target, rotation);
     });
   }
 

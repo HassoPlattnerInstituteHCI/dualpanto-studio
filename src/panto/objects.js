@@ -26,7 +26,9 @@ export class Obstacle extends WorldObject {
   enable() {
     if (this.enabled || this.removed) return this;
     this.enabled = true;
-    for (const id of this.deviceIds) this._rt.device.enableObstacle(id, this.handles);
+    if (!this._rt._deferObstacleActivation) {
+      for (const id of this.deviceIds) this._rt.device.enableObstacle(id, this.handles);
+    }
     this._rt._changed();
     return this;
   }

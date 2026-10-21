@@ -38,6 +38,8 @@ export class Runtime extends Emitter {
     this.device = device;
     this.project = project;
     this.running = false;
+    this._deferObstacleActivation = false;
+    this._levelLoadToken = 0;
     this.objects = new Map(); // id -> WorldObject (walls, rails, zones) for rendering
     this.me = new Handle(this, 0, 'me');
     this.it = new Handle(this, 1, 'it');
@@ -340,7 +342,8 @@ export class Runtime extends Emitter {
     for (const o of this.objects.values()) {
       if (!o._upload || o.removed) continue;
       o._upload();
-      if (o.enabled) for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
+      if (o.enabled && !this._deferObstacleActivation)
+        for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
       n++;
     }
     this.log('info', `${n} obstacles sent again.`);
@@ -384,6 +387,7 @@ export class Runtime extends Emitter {
       handle._pos = { x: h.x, y: h.y };
       handle._god = { ...h.god };
       handle._rot = h.rot;
+      handle._transition?.checkPosition?.();
       if (moved) for (const fn of handle._moveListeners) fn(handle.position);
     });
     this._checkZones();
@@ -670,6 +674,7 @@ export class Runtime extends Emitter {
   // ---- levels -----------------------------------------------------------
   async loadLevel(name) {
     this._assertRunning();
+    const loadToken = ++this._levelLoadToken;
     const code = this._codeLevels.get(name);
     const data =
       this.project.levels?.find((l) => l.name === name) ??
@@ -690,6 +695,7 @@ export class Runtime extends Emitter {
       );
       return null;
     }
+    this._deferObstacleActivation = true;
     this._levelScope?.dispose();
     this._levelScope = new Scope('level:' + name);
     const level = new Level(this, data);
@@ -726,13 +732,21 @@ export class Runtime extends Emitter {
     }
 
     const moves = [];
-    if (data.spawn?.me) moves.push(this.me.moveTo(data.spawn.me));
-    if (data.spawn?.it) moves.push(this.it.moveTo(data.spawn.it));
+    if (data.spawn?.me) moves.push(this.me.moveTo(data.spawn.me, {speed:250}));
+    if (data.spawn?.it) moves.push(this.it.moveTo(data.spawn.it, {speed:250}));
     if (data.intro) this.speak(data.intro, { interrupt: true });
     for (const h of this._levelHandlers) {
       if (h.name == null || h.name === name) h.fn(level);
     }
     await Promise.all(moves);
+    if (loadToken === this._levelLoadToken) {
+      this._deferObstacleActivation = false;
+      for (const o of this.objects.values()) {
+        if (o.enabled && !o.removed && o.deviceIds) {
+          for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
+        }
+      }
+    }
     return level;
   }
 
