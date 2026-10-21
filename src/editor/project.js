@@ -12,6 +12,12 @@ export const uid = (p = 'p') => p + Math.random().toString(36).slice(2, 10);
 export function createProject(templateKey = 'hello') {
   const t = TEMPLATES.find((x) => x.key === templateKey) ?? TEMPLATES[0];
   const data = t.project();
+  // Each copy of a template is a distinct project with its own level/object ids.
+  data.levels = (data.levels ?? []).map((level) => ({
+    ...level,
+    id: uid('l'),
+    objects: (level.objects ?? []).map((object) => ({ ...object, id: uid('o') })),
+  }));
   return normalize({ ...data, id: uid('p'), template: t.key, created: Date.now() });
 }
 

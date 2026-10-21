@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "id": "tpl_empty",
+  "name": "Empty project",
+  "description": "An empty level and an empty script.",
+  "script": "// Your program. Press ▶ Run to try it.\n// The API reference is in the \"API\" tab on the right.\n\nspeak(\"Let's go!\");\n",
+  "levels": [
+    {
+      "id": "o24",
+      "name": "Level 1",
+      "intro": "",
+      "script": "// Script for this level. \"level\" is the loaded level.\n// Example: level.zone(\"Goal\").onEnter(() => speak(\"Done!\"));\n",
+      "spawn": {},
+      "objects": []
+    }
+  ],
+  "startLevel": null,
+  "assets": [],
+  "settings": {
+    "lang": "en-US",
+    "device": "ember",
+    "boundary": false
+  }
+}

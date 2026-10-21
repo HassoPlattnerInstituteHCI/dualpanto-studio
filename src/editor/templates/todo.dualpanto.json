@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "tpl_todo",
+  "name": "To-do list (productivity)",
+  "description": "A haptic list with ui.menu: feel the tasks, tick them off, add new ones. Saves in the browser.",
+  "script": "// Productivity app: a to-do list you explore with the Me handle.\n// Enter/Space = tick off   N = new task   Delete = remove   L = read everything\n\nlet todos = storage.get(\"todos\", [\n  { text: \"Prepare slides\", done: false },\n  { text: \"Email supervisor\", done: true },\n  { text: \"Calibrate DualPanto\", done: false },\n]);\n\nconst label = (t) => (t.done ? \"done: \" : \"\") + t.text;\n\n// By default the menu sits in the middle of the Me area (x 190, from y 55, one item every 25 mm).\nconst list = ui.menu(todos.map(label), {\n  title: `Your tasks. ${todos.length} items.`,\n  onSelect: (item, i) => {\n    todos[i].done = !todos[i].done;\n    save();\n    speak(todos[i].done ? \"Done\" : \"Open again\", { interrupt: true });\n  },\n});\n\nfunction save() {\n  storage.set(\"todos\", todos);\n  list.setItems(todos.map(label));\n}\n\nonKey(\"n\", async () => {\n  const text = await ui.prompt(\"New task?\");\n  if (!text) return;\n  todos.push({ text, done: false });\n  save();\n  speak(\"Added: \" + text);\n});\n\nonKey(\"Delete\", () => {\n  const i = list.focused;\n  if (i < 0 || !todos[i]) return;\n  const [removed] = todos.splice(i, 1);\n  save();\n  speak(\"Deleted: \" + removed.text, { interrupt: true });\n});\n\nonKey(\"l\", async () => {\n  const open = todos.filter((t) => !t.done);\n  await speak(`${open.length} open tasks.`, { interrupt: true });\n  for (const t of open) await speak(t.text);\n});\n",
+  "levels": [],
+  "startLevel": null,
+  "assets": [],
+  "settings": {
+    "lang": "en-US",
+    "device": "ember",
+    "boundary": false
+  }
+}

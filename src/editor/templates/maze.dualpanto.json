@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "id": "tpl_maze",
+  "name": "Maze (2 levels)",
+  "description": "Two levels: a hallway with walls, then a rail. Shows how to switch levels.",
+  "script": "// Main script: intro, score and level control.\n// What happens inside a single level is in that level's script.\n\nstate.start = Date.now();\n\n// R = start over\nonKey(\"r\", () => {\n  state.start = Date.now();\n  panto.loadLevel(\"Hallway\");\n});\n\npanto.onLevel((level) => log(\"Level started: \" + level.name));\n",
+  "levels": [
+    {
+      "id": "o4",
+      "name": "Hallway",
+      "intro": "Level 1. Find the exit at the bottom right.",
+      "script": "level.zone(\"Exit\").onEnter(async () => {\n  await sound.success();\n  panto.loadLevel(\"Rail\");   // or panto.nextLevel()\n});\n",
+      "spawn": {
+        "me": {
+          "x": 110,
+          "y": 75
+        }
+      },
+      "objects": [
+        {
+          "id": "o5",
+          "type": "wall",
+          "name": "",
+          "points": [
+            {
+              "x": 150,
+              "y": 20
+            },
+            {
+              "x": 150,
+              "y": 120
+            }
+          ],
+          "closed": false
+        },
+        {
+          "id": "o6",
+          "type": "wall",
+          "name": "",
+          "points": [
+            {
+              "x": 215,
+              "y": 95
+            },
+            {
+              "x": 215,
+              "y": 195
+            }
+          ],
+          "closed": false
+        },
+        {
+          "id": "o7",
+          "type": "zone",
+          "name": "Exit",
+          "shape": "circle",
+          "x": 272,
+          "y": 145,
+          "r": 13,
+          "speak": ""
+        }
+      ]
+    },
+    {
+      "id": "o8",
+      "name": "Rail",
+      "intro": "Level 2. Follow the rail to the goal.",
+      "script": "level.zone(\"Goal\").onEnter(() => {\n  const seconds = Math.round((Date.now() - state.start) / 1000);\n  speak(`Done! You took ${seconds} seconds.`);\n});\n",
+      "spawn": {
+        "me": {
+          "x": 110,
+          "y": 75
+        }
+      },
+      "objects": [
+        {
+          "id": "o9",
+          "type": "rail",
+          "name": "Path",
+          "strength": 8,
+          "points": [
+            {
+              "x": 110,
+              "y": 75
+            },
+            {
+              "x": 190,
+              "y": 75
+            },
+            {
+              "x": 190,
+              "y": 140
+            },
+            {
+              "x": 268,
+              "y": 140
+            }
+          ]
+        },
+        {
+          "id": "o10",
+          "type": "zone",
+          "name": "Goal",
+          "shape": "circle",
+          "x": 268,
+          "y": 140,
+          "r": 14,
+          "speak": ""
+        }
+      ]
+    }
+  ],
+  "startLevel": null,
+  "assets": [],
+  "settings": {
+    "lang": "en-US",
+    "device": "ember",
+    "boundary": false
+  }
+}

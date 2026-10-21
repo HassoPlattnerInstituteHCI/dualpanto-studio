@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "tpl_tag",
+  "name": "Tag (It moves)",
+  "description": "It hides in random places, a tone tells you the distance. Shows it.moveTo and every().",
+  "script": "// Main script: greeting and score.\nstate.score = 0;\nspeak(\"Tag! It is hiding. The closer you get, the higher the tone.\");\n",
+  "levels": [
+    {
+      "id": "o11",
+      "name": "Field",
+      "intro": "",
+      "script": "// Game logic for the level \"Field\".\n\n// randomPoint(margin) returns a point that both Me AND It can reach\nasync function hide() {\n  await it.moveTo(randomPoint(15), { speed: 150 });\n}\n\nawait hide();\n\nevery(400, () => {\n  if (it.isMoving) return;\n  const d = me.distanceTo(it);\n  sound.beep(1000 - Math.min(800, d * 4), 60);\n  if (d < 15) {\n    state.score++;\n    speak(`Caught! ${state.score} points.`, { interrupt: true });\n    hide();\n  }\n});\n",
+      "spawn": {
+        "me": {
+          "x": 230,
+          "y": 125
+        }
+      },
+      "objects": []
+    }
+  ],
+  "startLevel": null,
+  "assets": [],
+  "settings": {
+    "lang": "en-US",
+    "device": "ember",
+    "boundary": false
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "id": "tpl_hello",
+  "name": "Hello Panto",
+  "description": "One level with a box and a goal. The simplest way to start.",
+  "script": "// Welcome! This script runs as soon as you press ▶ Run.\n// me = the handle the person moves. it = the handle the program moves.\n// In the emulator: drag Me with the left mouse button, It with Shift + drag.\n\n// The dashed outlines show where the handles can reach (orange = Me, purple = It).\n// The \"Boundary\" switch at the top turns the edge of the Me area into a wall.\n// Upload sounds on the left and play them with sound.play(\"name.wav\").\n\nspeak(\"Hello! There is a box in the middle. Find the goal at the bottom right.\");\n\n// Space: announce the position – works in every level\nonKey(\"Space\", () => {\n  speak(`You are at x ${Math.round(me.x)}, y ${Math.round(me.y)} millimetres.`);\n});\n",
+  "levels": [
+    {
+      "id": "o1",
+      "name": "Start",
+      "intro": "",
+      "script": "// This script belongs to the level \"Start\".\n\nlevel.zone(\"Goal\").onEnter(async () => {\n  await sound.success();\n  // It comes to you – but only if it can reach you there\n  if (it.canReach(me)) it.moveTo(me.position);\n  else speak(\"Unfortunately It can't get there.\");\n});\n",
+      "spawn": {
+        "me": {
+          "x": 130,
+          "y": 80
+        },
+        "it": {
+          "x": 200,
+          "y": 125
+        }
+      },
+      "objects": [
+        {
+          "id": "o2",
+          "type": "wall",
+          "name": "Box",
+          "points": [
+            {
+              "x": 170,
+              "y": 95
+            },
+            {
+              "x": 205,
+              "y": 95
+            },
+            {
+              "x": 205,
+              "y": 123
+            },
+            {
+              "x": 170,
+              "y": 123
+            }
+          ],
+          "closed": true
+        },
+        {
+          "id": "o3",
+          "type": "zone",
+          "name": "Goal",
+          "shape": "circle",
+          "x": 268,
+          "y": 140,
+          "r": 14,
+          "speak": "You found the goal!"
+        }
+      ]
+    }
+  ],
+  "startLevel": null,
+  "assets": [],
+  "settings": {
+    "lang": "en-US",
+    "device": "ember",
+    "boundary": false
+  }
+}

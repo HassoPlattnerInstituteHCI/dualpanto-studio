@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "id": "tpl_collect",
+  "name": "Collect (enemies & items)",
+  "description": "Collect three items while avoiding an enemy. Shows level.entity, patrol, follow and onFrame.",
+  "script": "// Main script: score and greeting.\n// You place enemies and items in the level editor (tools \"Enemy\" and \"Item\").\n// They are shown and react to touch – they are not attached to the device.\n\nstate.score = 0;\nspeak(\"Collect the three items. The enemy walks back and forth – avoid it.\");\n",
+  "levels": [
+    {
+      "id": "o12",
+      "name": "Hall",
+      "intro": "",
+      "script": "// Level script: here the objects from the editor get their behaviour.\n\nconst guard = level.entity(\"Guard\");\nguard.patrol([{ x: 140, y: 80 }, { x: 230, y: 80 }], { speed: 45 });\n\n// The It handle is attached to the enemy, so the person can feel it while it walks.\n// (it.stopFollow() or it.free() ends this again.)\nit.switchTo(guard, { speed: 150 });\nguard.onTouch(async () => {\n  await speak(\"Caught! Start over.\", { interrupt: true });\n  panto.loadLevel(\"Hall\");\n});\n\n// all items of the level: count them when collected\nfor (const item of level.items()) {\n  item.onCollect(() => {\n    state.score++;\n    speak(`${state.score} of ${level.items().length}`, { interrupt: true });\n    if (level.items().every((i) => !i.isVisible)) {\n      sound.success();\n      speak(\"All collected!\");\n    }\n  });\n}\n\n// distance to the enemy as a tone – onFrame runs every frame\nlet lastBeep = 0;\npanto.onFrame((dt, time) => {\n  const d = guard.distanceTo(me);\n  if (d > 60 || time - lastBeep < 0.35) return;\n  lastBeep = time;\n  sound.beep(1200 - d * 10, 40, { volume: 0.12 });\n});\n",
+      "spawn": {
+        "me": {
+          "x": 150,
+          "y": 120
+        }
+      },
+      "objects": [
+        {
+          "id": "o13",
+          "type": "wall",
+          "name": "Box",
+          "points": [
+            {
+              "x": 195,
+              "y": 100
+            },
+            {
+              "x": 225,
+              "y": 100
+            },
+            {
+              "x": 225,
+              "y": 124
+            },
+            {
+              "x": 195,
+              "y": 124
+            }
+          ],
+          "closed": true
+        },
+        {
+          "id": "o14",
+          "type": "entity",
+          "kind": "enemy",
+          "name": "Guard",
+          "shape": "circle",
+          "x": 140,
+          "y": 80,
+          "r": 13,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "o15",
+          "type": "entity",
+          "kind": "item",
+          "name": "Item 1",
+          "shape": "circle",
+          "x": 160,
+          "y": 152,
+          "r": 11,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "o16",
+          "type": "entity",
+          "kind": "item",
+          "name": "Item 2",
+          "shape": "circle",
+          "x": 240,
+          "y": 145,
+          "r": 11,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "o17",
+          "type": "entity",
+          "kind": "item",
+          "name": "Item 3",
+          "shape": "circle",
+          "x": 265,
+          "y": 95,
+          "r": 11,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        }
+      ]
+    }
+  ],
+  "startLevel": null,
+  "assets": [],
+  "settings": {
+    "lang": "en-US",
+    "device": "ember",
+    "boundary": false
+  }
+}
