@@ -56,6 +56,56 @@ const app = {
   folderDirty: false,
 };
 
+// Resizable workspace panels. Store pixel sizes locally so each user keeps their layout.
+function setupResizeHandles() {
+  const root = document.documentElement;
+  const config = {
+    sidebar: { property: '--sidebar-width', initial: 220, min: 150, max: () => innerWidth * 0.32, sign: 1 },
+    right: { property: '--right-width', initial: 36, min: 320, max: () => innerWidth * 0.58, sign: -1, percent: true },
+    props: { property: '--props-width', initial: 250, min: 170, max: () => innerWidth * 0.42, sign: -1 },
+    console: { property: '--stage-height', initial: 46, min: 120, max: () => innerHeight * 0.75, sign: 1, percent: true },
+  };
+  for (const [key, item] of Object.entries(config)) {
+    try {
+      const stored = localStorage.getItem(`studio-layout-${key}`);
+      if (stored && Number.isFinite(Number(stored))) root.style.setProperty(item.property, `${stored}${item.percent ? '%' : 'px'}`);
+    } catch { /* Private browsing may disable storage. */ }
+  }
+  for (const handle of document.querySelectorAll('[data-resize]')) {
+    const item = config[handle.dataset.resize];
+    handle.addEventListener('pointerdown', (event) => {
+      if (innerWidth <= 980) return;
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      const vertical = handle.dataset.resize === 'console';
+      const start = vertical ? event.clientY : event.clientX;
+      const computed = getComputedStyle(root).getPropertyValue(item.property).trim();
+      const fallback = item.percent ? item.initial : item.initial;
+      let initial = parseFloat(computed) || fallback;
+      if (item.percent) initial = item.property === '--stage-height'
+        ? parseFloat(getComputedStyle(document.querySelector('.right')).height) * initial / 100
+        : parseFloat(getComputedStyle(document.querySelector('.workspace')).width) * initial / 100;
+      const move = (e) => {
+        const delta = ((vertical ? e.clientY : e.clientX) - start) * item.sign;
+        const value = Math.max(item.min, Math.min(item.max(), initial + delta));
+        const stored = item.percent
+          ? value / (item.property === '--stage-height' ? document.querySelector('.right').clientHeight : document.querySelector('.workspace').clientWidth) * 100
+          : value;
+        root.style.setProperty(item.property, `${stored}${item.percent ? '%' : 'px'}`);
+        try { localStorage.setItem(`studio-layout-${handle.dataset.resize}`, String(stored)); } catch { /* optional */ }
+      };
+      const end = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // scripts: "main" is the project script, "level:<id>" the script of one level
 
@@ -1098,6 +1148,7 @@ const iconCopy = () => svg('<rect x="8" y="8" width="12" height="12" rx="2" fill
 // init
 
 async function init() {
+  setupResizeHandles();
   app.projects = loadAll();
   const current = app.projects.find((p) => p.id === getCurrentId()) ?? app.projects[0];
   app.project = current ?? createProject('hello');

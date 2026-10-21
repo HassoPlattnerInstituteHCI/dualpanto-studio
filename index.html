@@ -105,6 +105,7 @@
         <div id="storage-info" class="storage-info"></div>
       </div>
     </aside>
+    <button class="resize-handle resize-x" data-resize="sidebar" type="button" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize sidebar"></button>
 
     <section class="center" aria-labelledby="center-title">
       <div class="center-head">
@@ -151,16 +152,19 @@
             <canvas id="level-canvas" class="level-canvas" data-no-runtime-keys aria-label="Level editor"></canvas>
             <p id="tool-hint" class="tool-hint"></p>
           </div>
+          <button class="resize-handle resize-x level-resize" data-resize="props" type="button" role="separator" aria-orientation="vertical" aria-label="Resize level properties" title="Drag to resize properties"></button>
           <div id="props" class="props" aria-label="Properties"></div>
         </div>
       </div>
     </section>
+    <button class="resize-handle resize-x" data-resize="right" type="button" role="separator" aria-orientation="vertical" aria-label="Resize preview and editor" title="Drag to resize preview and editor"></button>
 
     <section class="right" aria-label="Preview and console">
       <div class="stage-wrap">
         <canvas id="stage" class="stage" tabindex="0" aria-label="Live preview"></canvas>
         <div id="stage-hint" class="stage-hint">Me: drag · It: Shift + drag · dashed: reachable area</div>
       </div>
+      <button class="resize-handle resize-y" data-resize="console" type="button" role="separator" aria-orientation="horizontal" aria-label="Resize preview and console" title="Drag to resize preview and console"></button>
       <div class="tabs" role="tablist">
         <button class="tab active" role="tab" data-tab="console" aria-selected="true">Console</button>
         <button class="tab" role="tab" data-tab="api" aria-selected="false">API</button>
