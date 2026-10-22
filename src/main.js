@@ -22,6 +22,7 @@ import { LevelEditor, TOOLS } from './editor/level-editor.js';
 import { Stage } from './editor/stage.js';
 import { fitView, drawWorld } from './editor/renderer.js';
 import { API_DTS, API_HTML } from './editor/api-docs.js';
+import { FREESOUND_API_TOKEN } from './editor/freesound-config.js';
 
 /** Shown in the console at startup – makes it obvious when the browser serves an old copy. */
 export const BUILD = '2026-10-13 · English UI';
@@ -514,7 +515,7 @@ function renderSounds() {
         onclick: () => togglePreview(a),
       }, playing ? '■' : '▶'),
       h('button', {
-        class: 'sound-meta', title: `${a.name} – click to insert sound.play("${a.name}") into the script`,
+        class: 'sound-meta', title: a.source ? `${a.name} · ${a.author ?? 'Unknown author'} · ${a.license ?? ''} · click to insert sound.play("${a.name}")` : `${a.name} – click to insert sound.play("${a.name}") into the script`,
         onclick: () => insertSnippet(soundSnippet(a.name)),
       }, h('span', { class: 'sound-name' }, a.name), h('span', { class: 'sound-size' }, formatBytes(a.size))),
       h('div', { class: 'sound-actions' },
@@ -919,6 +920,90 @@ function selectTab(tab) {
   }
   $('#tab-console').hidden = tab !== 'console';
   $('#tab-api').hidden = tab !== 'api';
+  $('#tab-freesound').hidden = tab !== 'freesound';
+  $('#btn-clear').hidden = tab !== 'console';
+}
+
+function formatDuration(seconds) {
+  const n = Math.max(0, Math.floor(Number(seconds) || 0));
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+}
+
+let freesoundQuery = '';
+let freesoundPage = 1;
+let freesoundHasMore = false;
+let freesoundLoading = false;
+
+async function searchFreesound(query, page = 1, append = false) {
+  const token = FREESOUND_API_TOKEN.trim();
+  const status = $('#freesound-status');
+  if (!token) { status.textContent = 'No shared token configured. Set FREESOUND_API_TOKEN in src/editor/freesound-config.js.'; return; }
+  const params = new URLSearchParams({ query, page_size: '15', sort: 'score',
+      fields: 'id,name,duration,license,username,previews,filesize', page: String(page) });
+  freesoundLoading = true;
+  $('#btn-freesound-more').disabled = true;
+  $('#btn-freesound-more').textContent = 'Loading…';
+  status.textContent = 'Searching Freesound…';
+  if (!append) $('#freesound-results').replaceChildren();
+  try {
+    const res = await fetch(`https://freesound.org/apiv2/search/?${params}`, { headers: { Authorization: `Token ${token}` } });
+    if (!res.ok) throw new Error(res.status === 401 ? 'Token rejected. Check the API token and try again.' : `Freesound returned HTTP ${res.status}.`);
+    const data = await res.json();
+    renderFreesoundResults(data.results ?? []);
+    freesoundQuery = query;
+    freesoundPage = page;
+    freesoundHasMore = !!data.next;
+    $('#btn-freesound-more').hidden = !freesoundHasMore;
+    const loaded = $('#freesound-results').querySelectorAll('.freesound-result').length;
+    status.textContent = data.count != null ? `Showing ${loaded} of ${data.count} results.` : `Showing ${loaded} results.`;
+  } catch (e) {
+    status.textContent = `${e.message} Check your connection and Freesound API access.`;
+  } finally {
+    freesoundLoading = false;
+    $('#btn-freesound-more').disabled = false;
+    $('#btn-freesound-more').textContent = 'Load more';
+  }
+}
+
+function renderFreesoundResults(results) {
+  const root = $('#freesound-results');
+  if (!results.length) { root.append(h('p', { class: 'muted small' }, 'No sounds found.')); return; }
+  for (const sound of results) {
+    const previewUrl = sound.previews?.['preview-hq-mp3'] ?? sound.previews?.['preview-lq-mp3'];
+    const title = sound.name || `Sound ${sound.id}`;
+    const row = h('article', { class: 'freesound-result' },
+      h('div', { class: 'freesound-result-info' },
+        h('span', { class: 'freesound-result-title' }, title),
+        h('span', { class: 'freesound-result-meta' }, `${sound.username ?? 'Unknown author'} · ${formatDuration(sound.duration)}`)),
+      previewUrl ? h('audio', { controls: true, preload: 'none', src: previewUrl, 'aria-label': `Preview ${title}` }) : h('span', { class: 'muted small' }, 'No preview'),
+      h('button', { class: 'btn btn-secondary', disabled: !previewUrl, onclick: () => importFreesoundSound(sound, previewUrl) }, 'Import'));
+    root.append(row);
+  }
+}
+
+async function importFreesoundSound(sound, previewUrl) {
+  const button = [...$('#freesound-results').querySelectorAll('button')].find((b) => b.parentElement?.querySelector('.freesound-result-title')?.textContent === sound.name);
+  if (button) { button.disabled = true; button.textContent = 'Importing…'; }
+  try {
+    const response = await fetch(previewUrl);
+    if (!response.ok) throw new Error(`Preview download failed (HTTP ${response.status}).`);
+    const blob = await response.blob();
+    const safeName = (sound.name || `sound-${sound.id}`).replace(/[\\/:*?"<>|]+/g, '-').slice(0, 90);
+    const file = new File([blob], `freesound-${sound.id}-${safeName}.mp3`, { type: blob.type || 'audio/mpeg' });
+    if (!isAudioFile(file)) throw new Error('Freesound returned an unsupported audio format.');
+    const taken = new Set((app.project.assets ?? []).map((a) => a.name));
+    let name = file.name, i = 2;
+    while (taken.has(name)) name = `freesound-${sound.id}-${safeName}-${i++}.mp3`;
+    const meta = await putAsset(app.project.id, file, { name, source: 'Freesound',
+      sourceUrl: `https://freesound.org/s/${sound.id}/`, author: sound.username ?? '', license: sound.license ?? '' });
+    app.project.assets = [...(app.project.assets ?? []), meta];
+    saveNow(); renderSounds();
+    $('#freesound-status').textContent = `Imported “${name}” (${formatBytes(meta.size)}). Click it in Sounds to insert sound.play(…).`;
+  } catch (e) {
+    $('#freesound-status').textContent = `Import failed: ${e.message}`;
+  } finally {
+    if (button?.isConnected) { button.disabled = false; button.textContent = 'Import'; }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1301,6 +1386,15 @@ async function init() {
     await addSounds(e.dataTransfer?.files ?? []);
   });
   $('#btn-clear').addEventListener('click', clearConsole);
+  $('#freesound-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const query = $('#freesound-query').value.trim();
+    if (!query) { $('#freesound-status').textContent = 'Enter a search term.'; return; }
+    searchFreesound(query);
+  });
+  $('#btn-freesound-more').addEventListener('click', () => {
+    if (!freesoundLoading && freesoundHasMore) searchFreesound(freesoundQuery, freesoundPage + 1, true);
+  });
   $('#opt-devicelog').addEventListener('change', (e) => {
     app.showDeviceLog = e.target.checked;
     if (app.serial) app.serial.verbose = e.target.checked; // log every obstacle packet

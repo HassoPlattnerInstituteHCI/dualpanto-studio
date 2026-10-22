@@ -168,6 +168,7 @@
       <div class="tabs" role="tablist">
         <button class="tab active" role="tab" data-tab="console" aria-selected="true">Console</button>
         <button class="tab" role="tab" data-tab="api" aria-selected="false">API</button>
+        <button class="tab" role="tab" data-tab="freesound" aria-selected="false">Sound Library</button>
         <div class="spacer"></div>
         <label class="check small tab-opt"><input id="opt-devicelog" type="checkbox" /> Device log</label>
         <button id="btn-clear" class="link-btn small">Clear</button>
@@ -177,6 +178,17 @@
       </div>
       <div id="tab-api" class="tab-body api" role="tabpanel" hidden>
         <div id="api-doc" class="api-doc"></div>
+      </div>
+      <div id="tab-freesound" class="tab-body freesound" role="tabpanel" hidden>
+        <form id="freesound-form" class="freesound-toolbar">
+          <label class="freesound-query-label">Search effects
+            <input id="freesound-query" type="search" placeholder="e.g. door slam, footsteps" autocomplete="off" />
+          </label>
+          <button class="btn btn-primary" type="submit">Search</button>
+        </form>
+        <div id="freesound-status" class="muted small" role="status"></div>
+        <div id="freesound-results" class="freesound-results"></div>
+        <button id="btn-freesound-more" class="btn btn-secondary" type="button" hidden>Load more</button>
       </div>
     </section>
   </main>

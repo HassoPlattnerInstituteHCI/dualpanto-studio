@@ -156,7 +156,8 @@ export async function readProjectFromFolder(dir, { projectId } = {}) {
       const file = await handle.getFile();
       if (!file.size) continue;
       try {
-        assets.push(await putAsset(id, file, { name }));
+        const credit = (meta.soundAttribution ?? []).find((item) => item.name === name);
+        assets.push(await putAsset(id, file, { name, ...(credit ?? {}) }));
       } catch (e) {
         console.warn('Sound skipped:', name, e);
       }
@@ -171,6 +172,7 @@ export async function readProjectFromFolder(dir, { projectId } = {}) {
     startLevel: meta.startLevel ?? null,
     settings: meta.settings ?? {},
     assets,
+    // Folder projects keep audio attribution beside the binary files.
     created: meta.created,
   });
   project.folderSlugs = slugs;
@@ -278,6 +280,9 @@ export async function writeProjectToFolder(dir, project) {
     settings: project.settings ?? {},
     levels: order,
     created: project.created ?? Date.now(),
+    soundAttribution: (project.assets ?? []).filter((a) => a.source).map((a) => ({
+      name: a.name, source: a.source, sourceUrl: a.sourceUrl, author: a.author, license: a.license,
+    })),
   });
   if (await writeTextIfChanged(dir, PROJECT_FILE, meta)) written.push(PROJECT_FILE);
   if ((await readText(dir, LEGACY_PROJECT_FILE)) != null) {

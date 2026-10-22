@@ -38,7 +38,8 @@ export function normalize(p) {
     })),
     startLevel: p.startLevel ?? null,
     // sounds: metadata only, the audio data itself lives in IndexedDB (assets.js)
-    assets: (p.assets ?? []).map((a) => ({ id: a.id, name: a.name, type: a.type ?? '', size: a.size ?? 0, created: a.created ?? Date.now() })),
+    assets: (p.assets ?? []).map((a) => ({ id: a.id, name: a.name, type: a.type ?? '', size: a.size ?? 0, created: a.created ?? Date.now(),
+      ...(a.source ? { source: a.source, sourceUrl: a.sourceUrl, author: a.author, license: a.license } : {}) })),
     settings: { lang: 'en-US', device: 'ember', boundary: false, ...(p.settings ?? {}) },
     // level id -> file name inside the project folder (only set for folder projects)
     folderSlugs: p.folderSlugs ?? {},

@@ -85,7 +85,11 @@ Notes:
 - **Script API:** see the "API" tab in the app. The editor offers autocompletion for it.
 - **Levels in code:** `panto.defineLevel("Arena", (level) => { … })` registers a level that does not exist in the editor at all – good for randomly generated or data-driven levels. `panto.onFrame((dt) => …)` runs every frame (about 60 Hz) for your own game logic, `panto.time` is the running time in seconds. Objects created by a level script are found by `level.entity("…")`, `level.items()`, `level.zones()` just like drawn ones.
 - **Voice input:** voice commands with patterns (`voice.command("set score {n:number}", …)`), questions with spoken answers (`voice.ask`, `voice.confirm`), push-to-talk, English and German number words, tolerance against recognition errors. See below.
-- **Sounds:** upload MP3/WAV in the sidebar or drag them in, play them in the script with `sound.play("name.wav")` (also `loop`, `volume`, `rate`, `stop()`, `await …ended`).
+- **Sounds:** upload MP3/WAV in the sidebar or drag them in, or search, preview and import Freesound previews in the Freesound tab. Search includes all licenses; check each sound's license and attribution before use. Imported audio is available in the script with `sound.play("name.wav")` (also `loop`, `volume`, `rate`, `stop()`, `await …ended`).
+
+### Freesound search token
+
+To use one Freesound API token across this static site, set `FREESOUND_API_TOKEN` in `src/editor/freesound-config.js` before deploying. **This publishes the token in the site's JavaScript.** Visitors can inspect and reuse it, so use this only if you accept that exposure and can replace the token if it is abused. A backend proxy is the safer option for a public site.
 - **Storage:** see below.
 
 ## Language

@@ -56,9 +56,10 @@ function tx(mode, fn, storeName = STORE) {
 export const assetId = () => 'a' + Math.random().toString(36).slice(2, 10);
 
 /** Metadata of one stored sound (what the project file remembers). */
-const meta = (r) => ({ id: r.id, name: r.name, type: r.type, size: r.size, created: r.created });
+const meta = (r) => ({ id: r.id, name: r.name, type: r.type, size: r.size, created: r.created,
+  ...(r.source ? { source: r.source, sourceUrl: r.sourceUrl, author: r.author, license: r.license } : {}) });
 
-export async function putAsset(projectId, file, { name } = {}) {
+export async function putAsset(projectId, file, { name, source, sourceUrl, author, license } = {}) {
   if (file.size > MAX_ASSET_BYTES) {
     throw new Error(`"${file.name}" is ${formatBytes(file.size)}. Files can be at most ${formatBytes(MAX_ASSET_BYTES)}.`);
   }
@@ -69,6 +70,7 @@ export async function putAsset(projectId, file, { name } = {}) {
     type: file.type || guessType(file.name),
     size: file.size,
     created: Date.now(),
+    ...(source ? { source, sourceUrl, author, license } : {}),
     blob: file instanceof Blob ? file : new Blob([file]),
   };
   await tx('readwrite', (store) => store.put(record));
@@ -164,6 +166,7 @@ export async function importAssets(projectId, assets = []) {
       type: a.type || guessType(a.name ?? ''),
       size: bytes.byteLength,
       created: Date.now(),
+      ...(a.source ? { source: a.source, sourceUrl: a.sourceUrl, author: a.author, license: a.license } : {}),
       blob: new Blob([bytes], { type: a.type || guessType(a.name ?? '') }),
     };
     await tx('readwrite', (store) => store.put(record));
