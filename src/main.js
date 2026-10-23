@@ -22,6 +22,7 @@ import { LevelEditor, TOOLS } from './editor/level-editor.js';
 import { Stage } from './editor/stage.js';
 import { fitView, drawWorld } from './editor/renderer.js';
 import { workAreaFor } from './panto/areas.js';
+import { loadVoices, voicesFor, makeUtterance, ttsSettings, ttsSupported, hasVoice, findVoice } from './panto/tts.js';
 import { API_DTS, API_HTML } from './editor/api-docs.js';
 import { FREESOUND_API_TOKEN } from './editor/freesound-config.js';
 
@@ -213,6 +214,7 @@ function openProject(project, { keepFolder = false } = {}) {
   clearConsole();
   if (!keepFolder) syncAssetList();
   else renderSounds();
+  if (!$('[data-sound-panel="tts"]').hidden) renderTts();
   app.folderDirty = false;
   renderSaveState();
   log('info', `Project "${app.project.name}" opened.`);
@@ -580,9 +582,65 @@ function insertSnippet(snippet) {
   app.code?.revealLine(app.project.script.split('\n').length - 1);
 }
 
+// ---------------------------------------------------------------------------
+// speech output settings (Sounds → TTS), stored in project.settings.tts
+
+let ttsVoices = [];
+
+async function renderTts() {
+  ttsVoices = await loadVoices();
+  const settings = ttsSettings(app.project);
+  const lang = app.project.settings.lang ?? 'en-US';
+  const own = voicesFor(ttsVoices, lang);
+  const status = $('#tts-status');
+  if (!ttsSupported() || !ttsVoices.length) {
+    status.dataset.state = 'none';
+    status.replaceChildren(
+      'This browser has no speech voices, so speak() only shows the caption. ',
+      'On Linux, Chromium gets its voices from speech-dispatcher: install it (',
+      h('code', {}, 'sudo apt install speech-dispatcher espeak-ng'),
+      ') and start Chromium with ', h('code', {}, '--enable-speech-dispatcher'), '. Google Chrome on Windows and macOS has voices built in.'
+    );
+  } else {
+    status.dataset.state = 'ok';
+    const active = findVoice(ttsVoices, settings.voice, lang);
+    status.textContent = `${own.length} ${langLabel(lang)} voice${own.length === 1 ? '' : 's'} on this computer. Speaking with: ${active?.name ?? 'browser default'}.`;
+  }
+  const sel = $('#tts-voice');
+  const label = (v) => `${v.name} (${v.lang}${v.localService ? '' : ', online'})`;
+  const auto = findVoice(ttsVoices, '', lang);
+  sel.replaceChildren(
+    h('option', { value: '' }, `Automatic${auto ? ` – ${auto.name}` : ''}`),
+    ...own.map((v) => h('option', { value: v.name }, label(v)))
+  );
+  // a voice chosen on another computer stays selected, marked as missing
+  if (settings.voice && !hasVoice(ttsVoices, settings.voice)) sel.append(h('option', { value: settings.voice }, `${settings.voice} (not on this computer)`));
+  sel.value = settings.voice;
+  sel.disabled = !ttsVoices.length;
+  $('#tts-rate').value = settings.rate;
+  $('#tts-rate-out').textContent = `${(+settings.rate).toFixed(2)}×`;
+  $('#tts-pitch').value = settings.pitch;
+  $('#tts-pitch-out').textContent = `${(+settings.pitch).toFixed(2)}`;
+}
+
+const langLabel = (lang) => ({ en: 'English', de: 'German' })[String(lang).split('-')[0]] ?? lang;
+
+function setTts(patch) {
+  app.project.settings.tts = { ...ttsSettings(app.project), ...patch };
+  scheduleSave();
+}
+
+function previewTts() {
+  if (!ttsSupported()) return;
+  speechSynthesis.cancel();
+  const text = $('#tts-text').value.trim() || 'Hello.';
+  speechSynthesis.speak(makeUtterance(text, { voices: ttsVoices, settings: ttsSettings(app.project), lang: app.project.settings.lang ?? 'en-US' }));
+}
+
 function selectSoundTab(key) {
   for (const b of document.querySelectorAll('[data-sound]')) b.setAttribute('aria-selected', b.dataset.sound === key);
   for (const p of document.querySelectorAll('[data-sound-panel]')) p.hidden = p.dataset.soundPanel !== key;
+  if (key === 'tts') renderTts();
   try {
     localStorage.setItem('dualpanto-web:sound-tab', key);
   } catch {}
@@ -1488,6 +1546,23 @@ async function init() {
   $('#btn-add-level-empty').addEventListener('click', addLevel);
   $('#btn-add-sound').addEventListener('click', () => $('#file-sound').click());
   for (const b of document.querySelectorAll('[data-sound]')) b.addEventListener('click', () => selectSoundTab(b.dataset.sound));
+  $('#tts-voice').addEventListener('change', (e) => {
+    setTts({ voice: e.target.value });
+    renderTts();
+    previewTts();
+  });
+  for (const key of ['rate', 'pitch']) {
+    const input = $(`#tts-${key}`);
+    input.addEventListener('input', () => {
+      $(`#tts-${key}-out`).textContent = key === 'rate' ? `${(+input.value).toFixed(2)}×` : (+input.value).toFixed(2);
+      setTts({ [key]: +input.value });
+    });
+    input.addEventListener('change', previewTts);
+  }
+  $('#tts-play').addEventListener('click', previewTts);
+  $('#tts-text').addEventListener('keydown', (e) => e.key === 'Enter' && previewTts());
+  $('#tts-insert').addEventListener('click', () => insertSnippet(`speak(${JSON.stringify($('#tts-text').value.trim() || 'Hello.')});`));
+  if (ttsSupported()) speechSynthesis.addEventListener('voiceschanged', () => !$('[data-sound-panel="tts"]').hidden && renderTts());
   let soundTab = 'library';
   try {
     soundTab = localStorage.getItem('dualpanto-web:sound-tab') || soundTab;

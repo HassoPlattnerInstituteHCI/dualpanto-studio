@@ -197,8 +197,27 @@
           <div class="sound-panel placeholder" data-sound-panel="record" hidden>
             <p class="muted">Record sounds with the microphone – coming soon.</p>
           </div>
-          <div class="sound-panel placeholder" data-sound-panel="tts" hidden>
-            <p class="muted">Turn text into a sound clip – coming soon.</p>
+          <div class="sound-panel tts" data-sound-panel="tts" hidden>
+            <p id="tts-status" class="tts-status muted small" role="status"></p>
+            <label class="field"><span class="field-label">Voice</span>
+              <select id="tts-voice"></select>
+              <span class="field-hint">Voices come from this computer, so they differ between Windows, macOS and Linux.</span>
+            </label>
+            <label class="field"><span class="field-label">Rate</span>
+              <span class="range-row"><input id="tts-rate" type="range" min="0.5" max="2" step="0.05" /><output id="tts-rate-out"></output></span>
+            </label>
+            <label class="field"><span class="field-label">Pitch</span>
+              <span class="range-row"><input id="tts-pitch" type="range" min="0.5" max="1.5" step="0.05" /><output id="tts-pitch-out"></output></span>
+            </label>
+            <div class="field">
+              <label class="field-label" for="tts-text">Preview</label>
+              <div class="tts-preview">
+                <input id="tts-text" type="text" value="Kitchen. An enemy is nearby." />
+                <button id="tts-play" class="btn btn-secondary btn-sm" type="button">▶ Play</button>
+                <button id="tts-insert" class="btn btn-ghost btn-sm" type="button" title="Insert speak(&quot;…&quot;) into the open script">Insert speak()</button>
+              </div>
+            </div>
+            <p class="muted small">These settings apply to every <code>speak()</code> and every "Say on …" text of the project. One sentence can use another voice: <code>speak("…", { voice: "Name" })</code>.</p>
           </div>
           <div class="sound-panel" data-sound-panel="upload" hidden>
             <ul id="sound-list" class="sound-list"></ul>

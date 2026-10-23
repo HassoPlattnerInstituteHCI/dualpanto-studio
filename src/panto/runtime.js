@@ -18,6 +18,7 @@ import {
 import { StopSignal, Scope } from './scope.js';
 import { Handle } from './handle.js';
 import { WorldObject, Obstacle, Zone, Entity, entityArgs } from './objects.js';
+import { loadVoices, makeUtterance, ttsSettings, ttsSupported, hasVoice, findVoice } from './tts.js';
 import { Level } from './level.js';
 import { createMenu } from './menu.js';
 
@@ -77,6 +78,7 @@ export class Runtime extends Emitter {
     window.addEventListener('keydown', this._onKeyDown);
     this._startTicker();
     this.log('info', `▶ Start (${d.kind === 'serial' ? 'DualPanto' : 'Emulator'})`);
+    this._checkVoices();
     try {
       await this._setupBoundary();
     } catch (e) {
@@ -757,7 +759,23 @@ export class Runtime extends Emitter {
   }
 
   // ---- speech & sound ---------------------------------------------------
-  speak(text, { interrupt = false, lang, rate = 1, pitch = 1 } = {}) {
+  /** Loads the speech voices once and says in the console when something is off. */
+  _checkVoices() {
+    this._voices = ttsSupported() ? speechSynthesis.getVoices() : [];
+    loadVoices().then((voices) => {
+      this._voices = voices;
+      if (!this.running) return;
+      const settings = ttsSettings(this.project);
+      const lang = this.project.settings?.lang ?? 'en-US';
+      if (!voices.length) {
+        this._warnOnce('no-voices', 'This browser has no speech voices: speak() only shows the caption. Sounds → TTS explains how to get voices.');
+      } else if (!hasVoice(voices, settings.voice)) {
+        this._warnOnce('voice-missing', `The voice "${settings.voice}" is not available on this computer – using "${findVoice(voices, '', lang)?.name ?? 'the default voice'}".`);
+      }
+    });
+  }
+
+  speak(text, { interrupt = false, lang, rate = 1, pitch = 1, voice } = {}) {
     text = String(text ?? '');
     this.caption = text;
     this.emit('speech', text);
@@ -778,10 +796,13 @@ export class Runtime extends Emitter {
     this._speaking = true;
     if (interrupt) speechSynthesis.cancel();
     return new Promise((resolve) => {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = lang ?? this.project.settings?.lang ?? 'en-US';
-      u.rate = rate;
-      u.pitch = pitch;
+      const voices = this._voices?.length ? this._voices : speechSynthesis.getVoices();
+      if (voice && voices.length && !hasVoice(voices, voice)) this._warnOnce(`voice:${voice}`, `speak(): there is no voice "${voice}" on this computer – using the project voice.`);
+      const u = makeUtterance(text, {
+        voices, settings: ttsSettings(this.project), lang: lang ?? this.project.settings?.lang ?? 'en-US', rate, pitch,
+        // an explicit language without a voice picks a voice of that language, not the project voice
+        voice: voice ?? (lang ? '' : undefined),
+      });
       const done = () => {
         clearTimeout(timer);
         spoken();
@@ -790,7 +811,7 @@ export class Runtime extends Emitter {
       u.onend = done;
       u.onerror = done;
       // browsers without voices never fire "end": resolve after an estimate
-      const timer = setTimeout(done, 1500 + (text.length * 90) / rate);
+      const timer = setTimeout(done, 1500 + (text.length * 90) / u.rate);
       speechSynthesis.speak(u);
     });
   }

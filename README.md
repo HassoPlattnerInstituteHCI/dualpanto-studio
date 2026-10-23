@@ -85,9 +85,13 @@ Notes:
 
 Everything in a level has to be reachable with both handles. "Full area" shows the two curved reachable areas of Me and It, as before. Most levels only need a simple shape, so "Square" and "Rhombus" use the **largest square** and the **largest rhombus** that lie inside the region both handles reach (both axis-aligned, stored in `EDITOR_VIEWS` in `src/panto/areas.js`): for the Ember 83 × 83 mm and 152 × 143 mm (diagonals). The shape is then **fixed in place**: it fills the canvas, zoom and panning are off, and nothing outside it is drawn – neither the curved areas nor objects that stick out (switching shows a warning when objects get cut off). New points, objects and start positions land inside the shape; moves and resizes that would push an object out are not applied, and boxes or zones dragged past the edge shrink to fit. The run view shows the shape the same way. On the device the handles are not held inside it. New levels start as "Square"; the choice is saved per level (`view` in the level, only written to folder projects when it is not "full").
 
+### Speech output (TTS)
+
+`speak()` and the "Say on …" texts use the browser's built-in voices (Web Speech API). Under Sounds → **TTS** the project picks a voice, rate and pitch, with a preview; the choice is saved in the project (`settings.tts`). `speak("…", { voice: "Name", rate: 1.4 })` changes them for one sentence (rate and pitch relative to the project setting). The voices come from the computer, so they differ between Windows, macOS and Linux; a project voice that does not exist on a computer falls back to the first voice of the project language, and the console says so. Chromium on Linux only has voices through speech-dispatcher (`sudo apt install speech-dispatcher espeak-ng`, start Chromium with `--enable-speech-dispatcher`); without any voice, `speak()` shows only the caption and the console warns once.
+
 ### Sounds tab
 
-"Library" searches Freesound and imports previews into the project (see "Freesound search token" below). "Upload" lists the project's sounds (drag files onto the tab or press "Add Sounds"). "Record" and "TTS" are placeholders for now.
+"Library" searches Freesound and imports previews into the project (see "Freesound search token" below). "Upload" lists the project's sounds (drag files onto the tab or press "Add Sounds"). "TTS" holds the speech settings (see above); "Record" is a placeholder for now.
 
 ## What's included
 

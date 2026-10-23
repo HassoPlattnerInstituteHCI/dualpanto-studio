@@ -316,6 +316,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sound-panel.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; border-radius: 10px; }
 .sound-panel.placeholder { display: grid; place-items: center; text-align: center; }
 .library-source { margin: 8px 2px 0; }
+.tts { max-width: 560px; }
+.tts .field select, .tts .field input[type='text'] {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-2);
+}
+.tts-status { margin: 0 0 12px; }
+.tts-status[data-state='none'] {
+  padding: 8px 10px; border-radius: 8px; color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+}
+.tts-status code { font: 11.5px var(--font-mono); }
+.tts-preview { display: flex; gap: 6px; align-items: center; }
+.tts-preview input { flex: 1; min-width: 0; }
+.tts p code { font: 11.5px var(--font-mono); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
 
 /* ---------- run view (fullscreen while the app runs) ---------- */
 .run-view { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--stage-bg); }
