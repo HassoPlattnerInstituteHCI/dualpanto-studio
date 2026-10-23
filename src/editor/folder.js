@@ -139,6 +139,7 @@ export async function readProjectFromFolder(dir, { projectId } = {}) {
       name: data.name ?? slug,
       intro: data.intro ?? '',
       spawn: data.spawn ?? {},
+      view: data.view ?? 'full',
       objects: data.objects ?? [],
       script: (levelsDir ? await readText(levelsDir, `${slug}.js`) : '') ?? '',
     };
@@ -232,6 +233,8 @@ export async function writeProjectToFolder(dir, project) {
       name: level.name,
       intro: level.intro ?? '',
       spawn: level.spawn ?? {},
+      // only written when set, so existing level files stay unchanged
+      ...(level.view && level.view !== 'full' ? { view: level.view } : {}),
       objects: level.objects ?? [],
     });
     if (await writeTextIfChanged(levelsDir, `${slug}.json`, data)) written.push(`levels/${slug}.json`);

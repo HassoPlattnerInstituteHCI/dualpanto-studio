@@ -34,6 +34,9 @@ export function normalize(p) {
       intro: l.intro ?? '',
       script: l.script ?? '',
       spawn: l.spawn ?? {},
+      // work area: 'full' (both curved areas), 'square' or 'rhombus', see panto/areas.js;
+      // older zoom presets ('both', 'single') show the full area
+      view: l.view === 'square' || l.view === 'rhombus' ? l.view : 'full',
       objects: (l.objects ?? []).map((o) => ({ id: o.id ?? uid('o'), ...o })),
     })),
     startLevel: p.startLevel ?? null,

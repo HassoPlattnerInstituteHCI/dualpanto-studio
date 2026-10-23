@@ -13,7 +13,7 @@ python3 serve.py          # opens http://localhost:8000 in the browser
 
 `serve.py` disables caching so the new version is always loaded after a change. `python3 -m http.server`, `npx serve` or "Live Server" in VS Code work too – if you get stale files there, do a hard reload (Ctrl/⌘ + Shift + R).
 
-On start, the console at the bottom right prints the software version, for example "Welcome to DualPanto Studio (2026-10-13 · English UI)". If it says something else, the browser is still serving an old copy.
+On start, the console (bottom right, "Console" tab) prints the software version, for example "Welcome to DualPanto Studio (2026-10-22 · new layout)". If it says something else, the browser is still serving an old copy.
 
 - **Emulator:** works in any current browser. Drag Me with the mouse, It with Shift + drag or the right mouse button.
 - **Real device:** only in Chrome or Edge on desktop (Web Serial API). The page must be served from `localhost` or `https`. "Connect device" lets you pick the port (CP210x / SLAB_USBtoUART). The ESP32 driver is still required.
@@ -72,20 +72,37 @@ Notes:
 - If a build is added later (TypeScript, React), "Deploy from a branch" becomes the workflow above with `path: dist`.
 - Users' projects still live in their browser or in their own folders – nothing is stored on Pages.
 
+## Layout
+
+- **Top bar:** project switcher (the name with ▾: rename, new project, all projects – later it will list all projects directly), save state, New and Projects. On the right: Reset, Boundary, Connect device, Self-test, the device status and ▶ Run.
+- **Left:** the program's main script, the levels as a slide overview (thumbnails, numbered) and, below them, the properties of the selected level or object.
+- **Center:** the level canvas with the tools, Clear, zoom, grid and undo/redo. "Square", "Rhombus" and "Full area" choose the level's work area (see below).
+- **Right:** the code editor on top ("Main" or the selected level's script), below it the tabs Sounds, Console and API.
+- The three columns and the two vertical splits are **resizable**: drag the dividers. The sizes are remembered in the browser.
+- **▶ Run** opens the running app **fullscreen**: the live view with the handles, a slim bar (Restart, Stop, device and microphone state) and a collapsible console that opens by itself on errors. **Esc** or Stop goes back to the editor. Esc is reserved for that – scripts don't receive it while the app runs.
+
+### Work area: Square, Rhombus, Full area
+
+Everything in a level has to be reachable with both handles. "Full area" shows the two curved reachable areas of Me and It, as before. Most levels only need a simple shape, so "Square" and "Rhombus" use the **largest square** and the **largest rhombus** that lie inside the region both handles reach (both axis-aligned, stored in `EDITOR_VIEWS` in `src/panto/areas.js`): for the Ember 83 × 83 mm and 152 × 143 mm (diagonals). The shape is then **fixed in place**: it fills the canvas, zoom and panning are off, and nothing outside it is drawn – neither the curved areas nor objects that stick out (switching shows a warning when objects get cut off). New points, objects and start positions land inside the shape; moves and resizes that would push an object out are not applied, and boxes or zones dragged past the edge shrink to fit. The run view shows the shape the same way. On the device the handles are not held inside it. New levels start as "Square"; the choice is saved per level (`view` in the level, only written to folder projects when it is not "full").
+
+### Sounds tab
+
+"Library" searches Freesound and imports previews into the project (see "Freesound search token" below). "Upload" lists the project's sounds (drag files onto the tab or press "Add Sounds"). "Record" and "TTS" are placeholders for now.
+
 ## What's included
 
 - **Templates:** Hello Panto, Maze (2 levels, walls and rail), To-do list (productivity app with `ui.menu` and `storage`), Tag (It moves), Collect (enemies and items), Pong (It is attached to the opponent, which follows the ball), Voice notes (voice input), Empty project.
-- **Level editor:** walls (as a polyline or closed shape), boxes, rails (hallways), rectangular and round zones, **enemies and items**, start positions for Me and It, grid, undo/redo and a properties panel with a "use in script" code snippet.
-- **Enemies, items and custom objects (entities):** visible objects in the scene that react when a handle comes within their radius. They are **not** attached to the device: they are drawn in the editor and the preview, and only felt if you explicitly want that (`solid: true` creates a round wall, `attachTo("it")` keeps sending the It handle there). Without a single line of code an item disappears and beeps when touched and an enemy buzzes; a text under "Say on touch" is spoken, a selected sound is played.
-- **Zoom and view presets in the level editor:** mouse wheel or pinch zooms towards the pointer, dragging empty space (or with the middle mouse button or Space held) pans. View presets in the toolbar and level properties let you switch between different workspaces: the **Biggest square** covered by the range of both Me and It handles (83 × 83 mm, key `1`, default), the **Whole area covered by both handles** (shared workspace 172 × 160 mm, key `2`), the **Maximum zoom with areas reached by only one handle** (277 × 177 mm, key `3`), and the **Full workspace** (360 × 210 mm, key `0`). Keys: `+`, `−`, `0`, `F` for selection.
+- **Level editor:** walls (as a polyline or closed shape), boxes, rails (hallways), rectangular and round zones, **enemies and items**, start positions for Me and It, grid, undo/redo, Clear (removes all objects, undo brings them back), work area Square/Rhombus/Full area and a properties panel with a "use in script" code snippet.
+- **Enemies, items and custom objects (entities):** visible objects in the scene that react when a handle comes within their radius. They are **not** attached to the device: they are drawn in the editor and the run view, and only felt if you explicitly want that (`solid: true` creates a round wall, `attachTo("it")` keeps sending the It handle there). Without a single line of code an item disappears and beeps when touched and an enemy buzzes; a text under "Say on touch" is spoken, a selected sound is played.
+- **Work area and zoom in the level editor:** keys `1` Square, `2` Rhombus, `0` Full area. Square and Rhombus are fixed in place (see "Work area" above). In Full area, the mouse wheel or pinch zooms towards the pointer and dragging empty space (or with the middle mouse button or Space held) pans; keys `+`, `−`, `F` for the selection.
 - **Attaching a handle to an object:** `it.switchTo(enemy)` moves the It handle to the object and keeps it attached – when the object moves, the handle moves along (0.8 mm lag, smooth; tuning knobs: `ease`, `hz`, `smooth`, `lead`). This is the counterpart to `PantoHandle.SwitchTo` in the Unity toolkit and the way to make an enemy tangible. The target can be an enemy/item, a zone, the other handle, a point or a function; `me.switchTo(...)` guides the person's hand. `it.stopFollow()` and `it.free()` end it.
 - **Objects at runtime:** walls, boxes, circles, rails, zones, enemies and items can be created, enabled, disabled and removed in the script at any time – on start, in a timer, in `onFrame`, in response to a zone, a key or a voice command. Find them again by name with `level.object/zone/entity` or `panto.find` (also in the main script). What a level script creates disappears when the level changes; what the main script creates stays. On the device every obstacle costs packets (CREATE + one packet per point + ENABLE, 10 ms apart each), so for frequent changes it is better to create once and only use enable/disable; zones and entities cost nothing.
-- **Multiple levels:** the sidebar shows all levels as thumbnails. `panto.loadLevel()` and `panto.nextLevel()` switch levels. Objects, zones, timers and key handlers a level creates are cleaned up automatically on the switch. `state` is kept.
-- **Scripts:** one **main script** (intro, score, level control, global keys) and one **level script** per level ("Script" tab in the level). In the level script, `level` is defined; everything it creates is cleaned up when the level changes. Errors in the console link to the right file and line.
+- **Multiple levels:** the sidebar shows all levels as a slide overview. `panto.loadLevel()` and `panto.nextLevel()` switch levels. Objects, zones, timers and key handlers a level creates are cleaned up automatically on the switch. `state` is kept.
+- **Scripts:** one **main script** (intro, score, level control, global keys) and one **level script** per level (select the level, then "Level" in the code editor's header). In the level script, `level` is defined; everything it creates is cleaned up when the level changes. Errors in the console link to the right file and line.
 - **Script API:** see the "API" tab in the app. The editor offers autocompletion for it.
 - **Levels in code:** `panto.defineLevel("Arena", (level) => { … })` registers a level that does not exist in the editor at all – good for randomly generated or data-driven levels. `panto.onFrame((dt) => …)` runs every frame (about 60 Hz) for your own game logic, `panto.time` is the running time in seconds. Objects created by a level script are found by `level.entity("…")`, `level.items()`, `level.zones()` just like drawn ones.
 - **Voice input:** voice commands with patterns (`voice.command("set score {n:number}", …)`), questions with spoken answers (`voice.ask`, `voice.confirm`), push-to-talk, English and German number words, tolerance against recognition errors. See below.
-- **Sounds:** upload MP3/WAV in the sidebar or drag them in, or search, preview and import Freesound previews in the Freesound tab. Search includes all licenses; check each sound's license and attribution before use. Imported audio is available in the script with `sound.play("name.wav")` (also `loop`, `volume`, `rate`, `stop()`, `await …ended`).
+- **Sounds:** upload MP3/WAV in the Sounds tab ("Add Sounds") or drag them onto it, or search, preview and import Freesound previews under "Library". Search includes all licenses; check each sound's license and attribution before use. Imported audio is available in the script with `sound.play("name.wav")` (also `loop`, `volume`, `rate`, `stop()`, `await …ended`).
 
 ### Freesound search token
 
@@ -118,7 +135,7 @@ const n    = await voice.ask("How many points?", { expect: "number" });
 const yes  = await voice.confirm("Really delete?");
 ```
 
-The last placeholder takes the rest of the sentence. Filler words before it, word endings ("starting" instead of "start") and umlaut spellings ("gruen"/"grün") are tolerated; `parseNumber`, `matchText` and `normalizeText` are also available on their own. The microphone pill at the top right shows the state and toggles on click; recognised sentences appear in the console and the preview.
+The last placeholder takes the rest of the sentence. Filler words before it, word endings ("starting" instead of "start") and umlaut spellings ("gruen"/"grün") are tolerated; `parseNumber`, `matchText` and `normalizeText` are also available on their own. The microphone pill in the run view's bar shows the state and toggles on click; recognised sentences appear in the console and the run view.
 
 ## Project as a folder (for working in pairs)
 
@@ -147,7 +164,7 @@ Folders created by older versions have a `projekt.json` instead; it is still rea
 ## Where the data lives
 
 - **Projects** (name, main script, levels with objects and level scripts, settings) are stored as JSON in the browser's **localStorage** under the key `dualpanto-web:projects`. That is only a few KB per project; localStorage holds about 5 MB in total. The data belongs to the browser and computer: another browser or computer does not see it, and "clear site data" removes it.
-- **Sounds** are stored as blobs in the **IndexedDB** `dualpanto-studio` (store `assets`), because audio files are too large for localStorage. Depending on browser and free disk space there are hundreds of MB available. The project itself only stores name, type and size. Each file may be up to 25 MB; the sidebar shows at the bottom how much space is used.
+- **Sounds** are stored as blobs in the **IndexedDB** `dualpanto-studio` (store `assets`), because audio files are too large for localStorage. Depending on browser and free disk space there are hundreds of MB available. The project itself only stores name, type and size. Each file may be up to 25 MB; the bottom of the sidebar shows how much space is used.
 - **Folder projects** live entirely on disk (see above). The browser only remembers which folder was last open and asks once for permission the next time.
 - **Backup and sharing:** "Projects → Export current project" writes a `.dualpanto.json` with everything, sounds embedded as Base64. Import puts the sounds back into IndexedDB. This is also the way to pass a project on to someone else or put it into git.
 - Sharing via a server would later need real storage (file export into a folder or a small backend). For the prototype, browser storage is enough.
@@ -156,7 +173,7 @@ Folders created by older versions have a `projekt.json` instead; it is still rea
 
 ```
 index.html, styles.css
-src/main.js                 app: project, sidebar, properties, console, run/stop
+src/main.js                 app: project, sidebar, properties, console, run/stop, run view
 src/panto/protocol.js       DualPanto serial protocol rev. 6 (build and parse packets)
 src/panto/webserial.js      real device via Web Serial (handshake, heartbeat, ACK/resend)
 src/panto/emulator.js       software panto: god object collision, rails, tweening
@@ -182,7 +199,7 @@ it.isFollowing; it.followName;    // true, "Guard"
 it.stopFollow();                  // stay put    it.free() = let go
 ```
 
-The target may be an enemy or item, a zone (its centre), the other handle, a point – or a function that returns a point (`it.switchTo(() => ({ x: 200, y: 110 + panto.time }))`). If the target leaves the handle's reachable area, the handle stays at the nearest reachable point and the console warns once. In the preview a dashed line shows which object a handle is attached to.
+The target may be an enemy or item, a zone (its centre), the other handle, a point – or a function that returns a point (`it.switchTo(() => ({ x: 200, y: 110 + panto.time }))`). If the target leaves the handle's reachable area, the handle stays at the nearest reachable point and the console warns once. In the run view a dashed line shows which object a handle is attached to.
 
 ### Keeping the handle smooth
 

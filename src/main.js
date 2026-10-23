@@ -21,11 +21,12 @@ import { createCodeEditor } from './editor/code-editor.js';
 import { LevelEditor, TOOLS } from './editor/level-editor.js';
 import { Stage } from './editor/stage.js';
 import { fitView, drawWorld } from './editor/renderer.js';
+import { workAreaFor } from './panto/areas.js';
 import { API_DTS, API_HTML } from './editor/api-docs.js';
 import { FREESOUND_API_TOKEN } from './editor/freesound-config.js';
 
 /** Shown in the console at startup – makes it obvious when the browser serves an old copy. */
-export const BUILD = '2026-10-13 · English UI';
+export const BUILD = '2026-10-22 · new layout';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const h = (tag, attrs = {}, ...children) => {
@@ -43,8 +44,8 @@ const h = (tag, attrs = {}, ...children) => {
 const app = {
   projects: [],
   project: null,
-  view: 'script', // 'script' (main script) or a level id
-  subtab: 'level', // when a level is open: 'level' (editor) or 'script'
+  levelId: null, // level shown in the canvas and the properties panel
+  codeTarget: 'main', // code editor shows the 'main' script or the selected 'level' script
   emulator: null,
   serial: null,
   device: null,
@@ -61,10 +62,10 @@ const app = {
 function setupResizeHandles() {
   const root = document.documentElement;
   const config = {
-    sidebar: { property: '--sidebar-width', initial: 220, min: 150, max: () => innerWidth * 0.32, sign: 1 },
-    right: { property: '--right-width', initial: 36, min: 320, max: () => innerWidth * 0.58, sign: -1, percent: true },
-    props: { property: '--props-width', initial: 250, min: 170, max: () => innerWidth * 0.42, sign: -1 },
-    console: { property: '--stage-height', initial: 46, min: 120, max: () => innerHeight * 0.75, sign: 1, percent: true },
+    sidebar: { property: '--sidebar-width', initial: 240, min: 180, max: () => innerWidth * 0.32, sign: 1 },
+    right: { property: '--right-width', initial: 35, min: 300, max: () => innerWidth * 0.58, sign: -1, percent: true, container: '.workspace' },
+    levels: { property: '--levels-height', initial: 42, min: 110, max: () => $('.sidebar').clientHeight - 150, sign: 1, percent: true, container: '.sidebar', vertical: true },
+    code: { property: '--code-height', initial: 42, min: 100, max: () => $('.right').clientHeight - 140, sign: 1, percent: true, container: '.right', vertical: true },
   };
   for (const [key, item] of Object.entries(config)) {
     try {
@@ -78,20 +79,16 @@ function setupResizeHandles() {
       if (innerWidth <= 980) return;
       event.preventDefault();
       handle.setPointerCapture(event.pointerId);
-      const vertical = handle.dataset.resize === 'console';
+      const vertical = !!item.vertical;
+      const size = () => (vertical ? $(item.container).clientHeight : $(item.container).clientWidth);
       const start = vertical ? event.clientY : event.clientX;
       const computed = getComputedStyle(root).getPropertyValue(item.property).trim();
-      const fallback = item.percent ? item.initial : item.initial;
-      let initial = parseFloat(computed) || fallback;
-      if (item.percent) initial = item.property === '--stage-height'
-        ? parseFloat(getComputedStyle(document.querySelector('.right')).height) * initial / 100
-        : parseFloat(getComputedStyle(document.querySelector('.workspace')).width) * initial / 100;
+      let initial = parseFloat(computed) || item.initial;
+      if (item.percent) initial = size() * initial / 100;
       const move = (e) => {
         const delta = ((vertical ? e.clientY : e.clientX) - start) * item.sign;
         const value = Math.max(item.min, Math.min(item.max(), initial + delta));
-        const stored = item.percent
-          ? value / (item.property === '--stage-height' ? document.querySelector('.right').clientHeight : document.querySelector('.workspace').clientWidth) * 100
-          : value;
+        const stored = item.percent ? value / size() * 100 : value;
         root.style.setProperty(item.property, `${stored}${item.percent ? '%' : 'px'}`);
         try { localStorage.setItem(`studio-layout-${handle.dataset.resize}`, String(stored)); } catch { /* optional */ }
       };
@@ -202,16 +199,16 @@ function openProject(project, { keepFolder = false } = {}) {
   app.project.folderSlugs = project.folderSlugs ?? {};
   if (!app.projects.some((p) => p.id === app.project.id)) app.projects.unshift(app.project);
   setCurrentId(app.project.id);
-  $('#project-name').value = app.project.name;
+  renderProjectName();
   $('#opt-boundary').checked = !!app.project.settings.boundary;
   // Throw away the old project's editor documents: "main" has the same name in the new
   // project, and a leftover document would overwrite its script.
   app.code?.reset();
-  openScript('main');
-  app.view = 'script';
-  app.subtab = 'level';
+  app.levelId = app.project.levels[0]?.id ?? null;
+  app.codeTarget = 'main';
   renderSidebar();
-  showView();
+  showLevel();
+  showCode();
   saveNow();
   clearConsole();
   if (!keepFolder) syncAssetList();
@@ -228,17 +225,20 @@ function renderSidebar() {
   const p = app.project;
   const list = $('#level-list');
   list.replaceChildren();
-  $('#nav-script').classList.toggle('active', app.view === 'script');
-  $('#nav-script').setAttribute('aria-current', app.view === 'script' ? 'page' : 'false');
+  const mainOpen = app.codeTarget === 'main';
+  $('#nav-script').classList.toggle('active', mainOpen);
+  $('#nav-script').setAttribute('aria-current', mainOpen ? 'true' : 'false');
   const start = p.startLevel ?? p.levels[0]?.name;
-  for (const level of p.levels) {
+  p.levels.forEach((level, i) => {
+    const active = app.levelId === level.id;
     const canvas = h('canvas', { class: 'thumb', 'aria-hidden': 'true' });
     const item = h(
       'li',
-      { class: 'level-item' + (app.view === level.id ? ' active' : '') },
+      { class: 'level-item' + (active ? ' active' : '') },
+      h('span', { class: 'level-num', 'aria-hidden': 'true' }, String(i + 1)),
       h(
         'button',
-        { class: 'level-open', onclick: () => selectView(level.id), 'aria-current': app.view === level.id ? 'page' : 'false' },
+        { class: 'level-open', onclick: () => selectLevel(level.id), 'aria-current': active ? 'true' : 'false' },
         canvas,
         h('span', { class: 'level-name' }, level.name),
         level.script?.trim() ? h('span', { class: 'level-script-badge', title: 'This level has its own script' }, 'JS') : null,
@@ -253,13 +253,14 @@ function renderSidebar() {
     );
     list.append(item);
     requestAnimationFrame(() => drawThumb(canvas, level));
-  }
+  });
   if (!p.levels.length) list.append(h('li', { class: 'empty' }, 'No levels yet. Apps don\'t necessarily need one.'));
 }
 
 function drawThumb(canvas, level) {
   const view = fitView(canvas, bounds(), 3);
-  drawWorld(canvas.getContext('2d'), view, { objects: level.objects, spawn: null, areas: app.device?.profile?.areas }, { grid: false, labels: false });
+  const areas = app.device?.profile?.areas;
+  drawWorld(canvas.getContext('2d'), view, { objects: level.objects, spawn: null, areas, workArea: workAreaFor(level.view) }, { grid: false, labels: false });
 }
 
 function refreshThumbs() {
@@ -267,60 +268,73 @@ function refreshThumbs() {
   items.forEach((c, i) => app.project.levels[i] && drawThumb(c, app.project.levels[i]));
 }
 
-function selectView(v, subtab) {
-  if (subtab) app.subtab = subtab;
-  app.view = v;
-  renderSidebar();
-  showView();
-}
-
-function selectSubtab(sub) {
-  app.subtab = sub;
-  for (const b of document.querySelectorAll('.subtab')) {
-    const on = b.dataset.sub === sub;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-selected', on);
-  }
-  showView();
-}
-
 function currentLevel() {
-  return app.project.levels.find((l) => l.id === app.view) ?? null;
+  return app.project.levels.find((l) => l.id === app.levelId) ?? null;
 }
 
-function showView() {
+/** Shows a level in the canvas and the properties panel. */
+function selectLevel(id) {
+  app.levelId = id;
+  renderSidebar();
+  showLevel();
+  if (app.codeTarget === 'level') showCode();
+}
+
+/** Switches the code editor between the main script and the selected level's script. */
+function selectCode(target) {
+  app.codeTarget = target === 'level' && currentLevel() ? 'level' : 'main';
+  renderSidebar();
+  showCode();
+}
+
+function showLevel() {
   const level = currentLevel();
-  const showCode = !level || app.subtab === 'script';
-  $('#view-script').hidden = !showCode;
-  $('#view-level').hidden = !(level && app.subtab === 'level');
-  $('#center-title').textContent = level ? `Level: ${level.name}` : 'Main script';
-  $('#level-tabs').hidden = !level;
-  $('#level-opts').hidden = !(level && app.subtab === 'level');
-  $('#script-hint').hidden = !showCode;
-  for (const b of document.querySelectorAll('.subtab')) {
-    const on = b.dataset.sub === app.subtab;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-selected', on);
-  }
-  if (level && app.subtab === 'level') {
-    app.levelEditor.setLevel(level);
-    const viewVal = app.levelEditor.viewMode || level.view || 'square';
-    const sel = $('#select-view');
-    if (sel) sel.value = viewVal;
-    renderProps(null);
+  $('#view-level').hidden = !level;
+  $('#view-empty').hidden = !!level;
+  $('#level-opts').hidden = !level;
+  $('#area-modes').hidden = !level;
+  $('#center-title').textContent = level ? `Level: ${level.name}` : 'Levels';
+  renderAreaModes();
+  if (level) {
+    if (app.levelEditor.level !== level) app.levelEditor.setLevel(level);
+    renderProps(app.levelEditor.selected);
     requestAnimationFrame(() => app.levelEditor.draw());
   } else {
-    openScript(fileKey(level));
-    requestAnimationFrame(() => app.code?.layout());
+    app.levelEditor.setLevel(null);
+    renderProps(null);
   }
+}
+
+function showCode() {
+  const level = currentLevel();
+  if (app.codeTarget === 'level' && !level) app.codeTarget = 'main';
+  const onLevel = app.codeTarget === 'level';
+  $('#code-title').textContent = onLevel ? `Level script: ${level.name}` : 'Main script';
+  for (const b of document.querySelectorAll('#code-target button')) {
+    b.setAttribute('aria-checked', b.dataset.code === app.codeTarget);
+    if (b.dataset.code === 'level') {
+      b.disabled = !level;
+      b.title = level ? `Script of the level "${level.name}"` : 'Select a level first';
+    }
+  }
+  openScript(onLevel ? fileKey(level) : 'main');
+  requestAnimationFrame(() => app.code?.layout());
+}
+
+function renderAreaModes() {
+  const mode = currentLevel()?.view ?? 'full';
+  for (const b of document.querySelectorAll('#area-modes button')) b.setAttribute('aria-checked', b.dataset.area === mode);
+  // square and rhombus are shown fixed in place: nothing to zoom or pan
+  $('.zoom-group').hidden = mode !== 'full';
 }
 
 function addLevel() {
   const name = uniqueLevelName(app.project);
-  const level = { id: uid('l'), name, intro: '', spawn: {}, objects: [], script: levelScriptTemplate(name), view: 'square' };
+  // new levels start with the square: most levels need no more, and it is reachable by both handles
+  const level = { id: uid('l'), name, intro: '', spawn: {}, view: 'square', objects: [], script: levelScriptTemplate(name) };
   app.project.levels.push(level);
   scheduleSave();
-  selectView(level.id);
+  selectLevel(level.id);
 }
 
 function duplicateLevel(level) {
@@ -330,16 +344,23 @@ function duplicateLevel(level) {
   copy.objects.forEach((o) => (o.id = uid('o')));
   app.project.levels.splice(app.project.levels.indexOf(level) + 1, 0, copy);
   scheduleSave();
-  selectView(copy.id);
+  selectLevel(copy.id);
 }
 
 function deleteLevel(level) {
   if (!confirm(`Delete level "${level.name}"?`)) return;
+  const i = app.project.levels.indexOf(level);
   app.project.levels = app.project.levels.filter((l) => l !== level);
   app.code?.forget(fileKey(level));
   if (app.project.startLevel === level.name) app.project.startLevel = null;
   scheduleSave();
-  selectView(app.view === level.id ? 'script' : app.view);
+  if (app.levelId === level.id) {
+    // show the neighbour, like deleting a slide
+    app.levelId = (app.project.levels[i] ?? app.project.levels[i - 1])?.id ?? null;
+    showLevel();
+    showCode();
+  }
+  renderSidebar();
 }
 
 // ---------------------------------------------------------------------------
@@ -503,7 +524,7 @@ function renderSounds() {
   list.replaceChildren();
   const assets = app.project.assets ?? [];
   if (!assets.length) {
-    list.append(h('li', { class: 'empty' }, 'Drag MP3 or WAV here or press ＋.'));
+    list.append(h('li', { class: 'empty' }, 'Drag MP3 or WAV here or press "Add Sounds".'));
   }
   for (const a of assets) {
     const playing = app.preview?.id === a.id;
@@ -547,18 +568,24 @@ function togglePreview(a) {
   });
 }
 
-/** Puts a snippet into whichever script is open. */
+/** Puts a snippet into whichever script the code editor shows. */
 function insertSnippet(snippet) {
-  const level = currentLevel();
-  if (level && app.subtab === 'script') return appendToLevelScript(snippet);
-  if (level) return appendToLevelScript(snippet);
+  if (app.codeTarget === 'level' && currentLevel()) return appendToLevelScript(snippet);
   syncScripts();
   const base = (app.project.script ?? '').replace(/\s*$/, '');
   app.project.script = (base ? base + '\n\n' : '') + snippet + '\n';
   app.code?.setValue('main', app.project.script);
   scheduleSave();
-  selectView('script');
+  selectCode('main');
   app.code?.revealLine(app.project.script.split('\n').length - 1);
+}
+
+function selectSoundTab(key) {
+  for (const b of document.querySelectorAll('[data-sound]')) b.setAttribute('aria-selected', b.dataset.sound === key);
+  for (const p of document.querySelectorAll('[data-sound-panel]')) p.hidden = p.dataset.soundPanel !== key;
+  try {
+    localStorage.setItem('dualpanto-web:sound-tab', key);
+  } catch {}
 }
 
 async function addSounds(files) {
@@ -589,6 +616,7 @@ async function addSounds(files) {
     }
   }
   saveNow();
+  selectSoundTab('upload');
   renderSounds();
 }
 
@@ -694,9 +722,8 @@ function appendToLevelScript(snippet) {
   level.script = (base ? base + '\n\n' : '') + snippet + '\n';
   app.code?.setValue(fileKey(level), level.script);
   scheduleSave();
-  selectView(level.id, 'script');
+  selectCode('level');
   app.code?.revealLine(level.script.split('\n').length - 1);
-  renderSidebar();
 }
 
 function renderProps(obj) {
@@ -720,6 +747,7 @@ function renderProps(obj) {
       scheduleSave();
       renderSidebar();
       $('#center-title').textContent = `Level: ${v}`;
+      showCode();
     });
     const intro = h('textarea', { rows: 3, placeholder: 'e.g. "Level 1. Find the exit."' });
     intro.value = level.intro ?? '';
@@ -740,22 +768,9 @@ function renderProps(obj) {
         ? h('span', { class: 'spawn-row' }, `${Math.round(sp[k].x)}, ${Math.round(sp[k].y)} mm `,
           h('button', { class: 'link-btn', onclick: () => { ed.snapshot(); delete level.spawn[k]; ed.changed(); renderProps(null); } }, 'remove'))
         : h('span', { class: 'muted' }, 'not set – tool "Start ' + (k === 'me' ? 'Me' : 'It') + '"');
-    const viewSel = h('select', {}, [
-      ['square', 'Biggest square (Me & It)'],
-      ['both', 'Covered by both (Me & It)'],
-      ['single', 'Single handles (max zoom)'],
-      ['full', 'Full workspace (360 × 210 mm)'],
-    ].map(([v, l]) => h('option', { value: v, selected: (level.view ?? 'square') === v }, l)));
-    viewSel.addEventListener('change', () => {
-      app.levelEditor.setViewMode(viewSel.value);
-      const sel = $('#select-view');
-      if (sel) sel.value = viewSel.value;
-      scheduleSave();
-    });
     panel.append(
       h('h3', {}, 'Level'),
       field('Name', name, 'Use this name to load the level in the script.'),
-      field('Workspace view', viewSel, 'Presets: biggest square, both handles, single handles, full area.'),
       field('Say on load', intro),
       h('label', { class: 'check' }, start, 'Load when the program starts'),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Start Me'), spawnInfo('me')),
@@ -828,7 +843,7 @@ function renderProps(obj) {
       .map(([v, l]) => h('option', { value: v, selected: (obj.kind ?? 'marker') === v }, l)));
     kindSel.addEventListener('change', () => {
       ed.update(obj, { kind: kindSel.value });
-      renderProps(obj); // andere Art, andere Optionen
+      renderProps(obj); // other kind, other options
     });
     const say = h('textarea', { rows: 2, placeholder: obj.kind === 'item' ? 'e.g. "Coin!"' : 'e.g. "Ouch!"' });
     say.value = obj.speak ?? '';
@@ -844,7 +859,7 @@ function renderProps(obj) {
       field('Kind', kindSel, 'Enemies and items are shown; the script gives them their behaviour.'),
       range('Radius (touch)', 'r', { min: 4, max: 40, hint: 'How close the handle has to get for onTouch to fire.' }),
       field('Say on touch', say),
-      field('Play on touch', sndSel, sounds.length ? null : 'Upload sounds in the sidebar on the left.'),
+      field('Play on touch', sndSel, sounds.length ? null : 'Add sounds in the Sounds tab.'),
       check('Tangible: round wall on the device', 'solid', 'Unchecked, the object is only visible and reacts to touch. Checked, the runtime creates a round wall; moving objects are only re-sent when they stop.'),
       obj.kind === 'item' ? check('Disappears when collected', 'vanish', null, true) : null,
       select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
@@ -888,6 +903,14 @@ function renderProps(obj) {
 
 function clearConsole() {
   $('#console-list').replaceChildren();
+  $('#run-console-list').replaceChildren();
+  renderRunConsoleCount();
+}
+
+function renderRunConsoleCount() {
+  const rows = $('#run-console-list').children;
+  const errors = $('#run-console-list').querySelectorAll('.log-error').length;
+  $('#run-console-count').textContent = rows.length ? `${rows.length} line${rows.length > 1 ? 's' : ''}${errors ? ` · ${errors} error${errors > 1 ? 's' : ''}` : ''}` : '';
 }
 
 function log(level, text, line, source) {
@@ -899,8 +922,11 @@ function log(level, text, line, source) {
     const key = source?.levelId ? `level:${source.levelId}` : 'main';
     const where = source && source.id !== 'main' ? ` in ${source.label}` : '';
     const open = () => {
-      if (source?.levelId) selectView(source.levelId, 'script');
-      else selectView('script');
+      stopRun();
+      if (source?.levelId) {
+        selectLevel(source.levelId);
+        selectCode('level');
+      } else selectCode('main');
       if (line) app.code?.revealLine(line);
     };
     row.append(h('button', { class: 'link-btn log-line', onclick: open }, line ? `Line ${line}${where}` : `open${where}`));
@@ -909,7 +935,19 @@ function log(level, text, line, source) {
   list.append(row);
   while (list.children.length > 400) list.firstChild.remove();
   list.scrollTop = list.scrollHeight;
-  if (level === 'error') selectTab('console');
+  // the fullscreen run view has its own copy of the console
+  const runList = $('#run-console-list');
+  const copy = row.cloneNode(true);
+  const link = row.querySelector('.log-line');
+  copy.querySelector('.log-line')?.replaceWith(h('button', { class: 'link-btn log-line', onclick: () => link.click() }, link?.textContent));
+  runList.append(copy);
+  while (runList.children.length > 200) runList.firstChild.remove();
+  runList.scrollTop = runList.scrollHeight;
+  renderRunConsoleCount();
+  if (level === 'error') {
+    selectTab('console');
+    $('#run-console').open = true;
+  }
 }
 
 function selectTab(tab) {
@@ -918,10 +956,9 @@ function selectTab(tab) {
     b.classList.toggle('active', on);
     b.setAttribute('aria-selected', on);
   }
+  $('#tab-sounds').hidden = tab !== 'sounds';
   $('#tab-console').hidden = tab !== 'console';
   $('#tab-api').hidden = tab !== 'api';
-  $('#tab-freesound').hidden = tab !== 'freesound';
-  $('#btn-clear').hidden = tab !== 'console';
 }
 
 function formatDuration(seconds) {
@@ -998,13 +1035,14 @@ async function importFreesoundSound(sound, previewUrl) {
       sourceUrl: `https://freesound.org/s/${sound.id}/`, author: sound.username ?? '', license: sound.license ?? '' });
     app.project.assets = [...(app.project.assets ?? []), meta];
     saveNow(); renderSounds();
-    $('#freesound-status').textContent = `Imported “${name}” (${formatBytes(meta.size)}). Click it in Sounds to insert sound.play(…).`;
+    $('#freesound-status').textContent = `Imported “${name}” (${formatBytes(meta.size)}). Click it under "Upload" to insert sound.play(…).`;
   } catch (e) {
     $('#freesound-status').textContent = `Import failed: ${e.message}`;
   } finally {
     if (button?.isConnected) { button.disabled = false; button.textContent = 'Import'; }
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // microphone (voice input)
@@ -1068,9 +1106,10 @@ function attachDevice(device) {
 
 function updateDeviceUi() {
   const serial = app.device?.kind === 'serial';
-  const pill = $('#device-status');
-  pill.dataset.state = serial ? (app.device.connected ? 'connected' : 'waiting') : 'emulator';
-  pill.textContent = serial ? (app.device.connected ? 'DualPanto connected' : 'Connecting …') : 'Emulator';
+  for (const pill of [$('#device-status'), $('#run-device')]) {
+    pill.dataset.state = serial ? (app.device.connected ? 'connected' : 'waiting') : 'emulator';
+    pill.textContent = serial ? (app.device.connected ? 'DualPanto connected' : 'Connecting …') : 'Emulator';
+  }
   $('#btn-connect').textContent = serial ? 'Disconnect' : 'Connect device';
   $('#stage-hint').hidden = serial;
 }
@@ -1096,7 +1135,7 @@ async function toggleDevice() {
   serial.on('status', () => updateDeviceUi());
   try {
     $('#device-status').dataset.state = 'waiting';
-    $('#device-status').textContent = 'Verbinde …';
+    $('#device-status').textContent = 'Connecting …';
     const p = serial.connect();
     app.serial = serial;
     await p;
@@ -1145,6 +1184,12 @@ async function run({ startLevel, project: override } = {}) {
     renderVoice();
   });
   rt.on('voice', (info) => renderVoice(info));
+  rt.on('level', (level) => ($('#run-level').textContent = level?.name ? `Level: ${level.name}` : ''));
+  $('#run-title').textContent = project.name;
+  $('#run-level').textContent = '';
+  $('#run-console-list').replaceChildren();
+  $('#run-console').open = false;
+  renderRunConsoleCount();
   const started = rt.start();
   updateRunUi();
   renderVoice();
@@ -1158,12 +1203,21 @@ function stopRun() {
   updateRunUi();
 }
 
+/** While the app runs it takes the whole window; Stop or Esc goes back to the editor. */
 function updateRunUi() {
   const running = !!app.runtime?.running;
-  $('#btn-run').hidden = running;
-  $('#btn-stop').hidden = !running;
-  $('#btn-restart').hidden = !running;
+  const wasRunning = !$('#run-view').hidden;
+  $('#run-view').hidden = !running;
+  $('#workspace').inert = running;
+  document.querySelector('.topbar').inert = running;
   document.body.classList.toggle('is-running', running);
+  if (wasRunning && !running) {
+    // back in the editor: canvases were hidden, redraw them at their size
+    requestAnimationFrame(() => {
+      app.levelEditor?.draw();
+      app.code?.layout();
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1212,6 +1266,45 @@ function openProjectsDialog() {
   };
   render();
   dlg.showModal();
+}
+
+// ---------------------------------------------------------------------------
+// project switcher (top bar). For now it lists the open project; later all of them.
+
+function renderProjectName() {
+  $('#project-name').textContent = app.project.name;
+}
+
+function renameProject() {
+  const name = prompt('Project name', app.project.name);
+  if (name == null) return;
+  app.project.name = name.trim() || 'Untitled';
+  renderProjectName();
+  scheduleSave();
+}
+
+function toggleProjectMenu(open = $('#project-menu').hidden) {
+  const menu = $('#project-menu');
+  const btn = $('#project-switch');
+  if (!open) {
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const item = (label, onclick, mark = '') =>
+    h('button', { class: 'menu-item', role: 'menuitem', onclick: () => { toggleProjectMenu(false); onclick(); } },
+      h('span', { class: 'check-mark', 'aria-hidden': 'true' }, mark), label);
+  menu.replaceChildren(
+    h('div', { class: 'menu-label' }, 'Projects'),
+    item(app.project.name, () => {}, '✓'),
+    h('div', { class: 'menu-sep', role: 'separator' }),
+    item('Rename …', renameProject),
+    item('New project …', openNewDialog),
+    item('All projects …', openProjectsDialog)
+  );
+  menu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  menu.querySelector('.menu-item')?.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,22 +1372,16 @@ async function init() {
       scheduleSave();
       if (!info?.live) {
         refreshThumbs();
+        renderAreaModes();
         if (!app.levelEditor.selected) renderProps(null);
       }
     },
     onSelect: (obj) => renderProps(obj),
   });
   app.levelEditor.onToolShortcut = setTool;
-  app.levelEditor.onViewChange = (zoom, mode) => {
+  app.levelEditor.onViewChange = (zoom) => {
     $('#btn-zoom-level').textContent = `${Math.round(zoom * 100)} %`;
-    const sel = $('#select-view');
-    if (sel && mode) sel.value = mode;
   };
-  $('#select-view').addEventListener('change', (e) => {
-    app.levelEditor.setViewMode(e.target.value);
-    scheduleSave();
-    if (!app.levelEditor.selected) renderProps(null);
-  });
   $('#btn-zoom-in').addEventListener('click', () => app.levelEditor.zoomBy(1.25));
   $('#btn-zoom-out').addEventListener('click', () => app.levelEditor.zoomBy(1 / 1.25));
   $('#btn-zoom-level').addEventListener('click', () => app.levelEditor.resetView());
@@ -1303,12 +1390,43 @@ async function init() {
   $('#opt-snap').addEventListener('change', (e) => (app.levelEditor.snap = e.target.checked));
   $('#btn-undo').addEventListener('click', () => app.levelEditor.undo());
   $('#btn-redo').addEventListener('click', () => app.levelEditor.redo());
+  const setAreaMode = (mode) => {
+    const outside = app.levelEditor.setAreaMode(mode);
+    if (outside) log('warn', `${outside} object${outside > 1 ? 's lie' : ' lies'} (partly) outside the ${mode} and ${outside > 1 ? 'are' : 'is'} cut off. Move ${outside > 1 ? 'them' : 'it'} inside or switch back to "Full area".`);
+    if (outside) selectTab('console');
+  };
+  app.levelEditor.onAreaKey = setAreaMode;
+  for (const b of document.querySelectorAll('#area-modes button')) b.addEventListener('click', () => setAreaMode(b.dataset.area));
+  $('#btn-clear-level').addEventListener('click', () => {
+    const level = currentLevel();
+    if (!level?.objects.length) return;
+    if (!confirm(`Remove all ${level.objects.length} objects from "${level.name}"? Undo brings them back.`)) return;
+    app.levelEditor.clearObjects();
+  });
+
+  let thumbFrame = 0;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(thumbFrame);
+    thumbFrame = requestAnimationFrame(refreshThumbs);
+  }).observe($('#level-list'));
 
   // top bar
-  $('#project-name').value = app.project.name;
-  $('#project-name').addEventListener('input', (e) => {
-    app.project.name = e.target.value || 'Untitled';
-    scheduleSave();
+  renderProjectName();
+  $('#project-switch').addEventListener('click', () => toggleProjectMenu());
+  $('#project-switch').addEventListener('dblclick', renameProject);
+  document.addEventListener('pointerdown', (e) => {
+    if (!$('#project-menu').hidden && !e.target.closest('.project-switch')) toggleProjectMenu(false);
+  });
+  $('#project-menu').addEventListener('keydown', (e) => {
+    const items = [...$('#project-menu').querySelectorAll('.menu-item')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+      toggleProjectMenu(false);
+      $('#project-switch').focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    }
   });
   $('#btn-new').addEventListener('click', openNewDialog);
   $('#btn-open-folder').addEventListener('click', () => {
@@ -1364,23 +1482,33 @@ async function init() {
     scheduleSave();
     log('info', e.target.checked ? 'The edge of the Me area will be created as a wall on start.' : 'The edge of the Me area is no longer created as a wall.');
   });
-  $('#nav-script').addEventListener('click', () => selectView('script'));
+  $('#nav-script').addEventListener('click', () => selectCode('main'));
+  for (const b of document.querySelectorAll('#code-target button')) b.addEventListener('click', () => selectCode(b.dataset.code));
   $('#btn-add-level').addEventListener('click', addLevel);
+  $('#btn-add-level-empty').addEventListener('click', addLevel);
   $('#btn-add-sound').addEventListener('click', () => $('#file-sound').click());
+  for (const b of document.querySelectorAll('[data-sound]')) b.addEventListener('click', () => selectSoundTab(b.dataset.sound));
+  let soundTab = 'library';
+  try {
+    soundTab = localStorage.getItem('dualpanto-web:sound-tab') || soundTab;
+  } catch {}
+  selectSoundTab(soundTab);
   $('#file-sound').addEventListener('change', async (e) => {
     const files = [...e.target.files]; // copy: resetting the input empties the FileList
     e.target.value = '';
     await addSounds(files);
   });
-  const dropZone = $('#sound-section');
+  // sound files can be dropped anywhere on the Sounds tab
+  const dropZone = $('#tab-sounds');
   for (const type of ['dragenter', 'dragover']) {
     dropZone.addEventListener(type, (e) => {
       if (![...(e.dataTransfer?.types ?? [])].includes('Files')) return;
       e.preventDefault();
-      dropZone.classList.add('dropping');
+      selectSoundTab('upload');
+      $('[data-sound-panel="upload"]').classList.add('dropping');
     });
   }
-  for (const type of ['dragleave', 'drop']) dropZone.addEventListener(type, () => dropZone.classList.remove('dropping'));
+  for (const type of ['dragleave', 'drop']) dropZone.addEventListener(type, () => $('[data-sound-panel="upload"]').classList.remove('dropping'));
   dropZone.addEventListener('drop', async (e) => {
     e.preventDefault();
     await addSounds(e.dataTransfer?.files ?? []);
@@ -1400,7 +1528,6 @@ async function init() {
     if (app.serial) app.serial.verbose = e.target.checked; // log every obstacle packet
   });
   for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => selectTab(b.dataset.tab));
-  for (const b of document.querySelectorAll('.subtab')) b.addEventListener('click', () => selectSubtab(b.dataset.sub));
   for (const d of document.querySelectorAll('dialog')) {
     d.addEventListener('click', (e) => e.target === d && d.close());
     d.querySelector('[data-close]')?.addEventListener('click', () => d.close());
@@ -1408,12 +1535,19 @@ async function init() {
   $('#api-doc').innerHTML = API_HTML;
   if (!SerialDevice.isSupported()) $('#btn-connect').title = 'Web Serial is only available in Chrome and Edge on desktop.';
 
+  // Esc leaves the fullscreen run view. Capture phase: scripts don't get this key.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !app.runtime?.running || document.querySelector('dialog[open]')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    stopRun();
+  }, true);
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     // zoom keys work while a level is open, even if the canvas has no focus
     const t = e.target;
-    const typing = t && t.closest && t.closest('input, textarea, select, [contenteditable="true"], .monaco-editor');
-    if (!typing && currentLevel() && app.subtab === 'level' && app.levelEditor?.handleViewKey(e)) {
+    const typing = t && t.closest && t.closest('input, textarea, select, [contenteditable="true"], .monaco-editor, .menu');
+    if (!typing && !app.runtime?.running && currentLevel() && app.levelEditor?.handleViewKey(e)) {
       e.preventDefault();
       return;
     }
@@ -1433,8 +1567,10 @@ async function init() {
     if (app.folder && app.folderDirty) e.preventDefault();
   });
 
+  app.levelId = app.project.levels[0]?.id ?? null;
   renderSidebar();
-  showView();
+  showLevel();
+  showCode();
   syncAssetList();
   renderSaveState();
   renderFolderUi();
@@ -1462,7 +1598,7 @@ async function init() {
       if (key !== 'main') renderSidebar();
     },
   });
-  openScript(fileKey(currentLevel()));
+  showCode();
   dark.addEventListener('change', (e) => app.code.setTheme(e.matches));
   $('#code-loading')?.remove();
   window.__studio = app; // for debugging in the console

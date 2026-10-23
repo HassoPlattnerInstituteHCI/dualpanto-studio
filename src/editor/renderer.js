@@ -2,7 +2,6 @@
 // the level editor so both look the same.
 
 import { edges, shapeCenter } from '../panto/geometry.js';
-import { EDITOR_VIEWS } from '../panto/areas.js';
 
 export function cssVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -31,8 +30,9 @@ export function palette() {
 /**
  * Computes a view that fits the working area into the canvas.
  * `view.zoom` (1 = fit) and `view.pan` (screen pixels) zoom into a detail.
+ * `focus` ({ x, y, width, height } in mm) fits that rectangle instead of the whole area.
  */
-export function fitView(canvas, bounds, margin = 16, { zoom = 1, pan = { x: 0, y: 0 } } = {}) {
+export function fitView(canvas, bounds, margin = 16, { zoom = 1, pan = { x: 0, y: 0 }, focus } = {}) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -40,10 +40,11 @@ export function fitView(canvas, bounds, margin = 16, { zoom = 1, pan = { x: 0, y
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
   }
-  const base = Math.max(0.1, Math.min((w - margin * 2) / bounds.width, (h - margin * 2) / bounds.height));
+  const f = focus ?? { x: 0, y: 0, width: bounds.width, height: bounds.height };
+  const base = Math.max(0.1, Math.min((w - margin * 2) / f.width, (h - margin * 2) / f.height));
   const scale = base * zoom;
-  const ox = (w - bounds.width * scale) / 2 + pan.x;
-  const oy = (h - bounds.height * scale) / 2 + pan.y;
+  const ox = (w - f.width * scale) / 2 - f.x * scale + pan.x;
+  const oy = (h - f.height * scale) / 2 - f.y * scale + pan.y;
   return {
     dpr, scale, base, zoom, pan, ox, oy, w, h, bounds,
     toScreen: (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale }),
@@ -59,11 +60,25 @@ export function drawWorld(ctx, view, scene, opts = {}) {
   ctx.fillStyle = c.bg;
   ctx.fillRect(0, 0, view.w, view.h);
 
-  // working area
+  // working area. With a square/rhombus work area only that shape is drawn: what lies
+  // outside it does not matter for the level, so it is not shown at all.
   ctx.save();
   ctx.translate(view.ox, view.oy);
   ctx.scale(scale, scale);
   const { width, height } = view.bounds;
+  const px = (n) => n / scale; // screen pixels -> world units
+  const objects = scene.objects ?? [];
+  const shape = scene.workArea?.points?.length ? scene.workArea.points : null;
+  const outline = () => {
+    ctx.beginPath();
+    shape.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.closePath();
+  };
+  if (shape) {
+    ctx.save();
+    outline();
+    ctx.clip();
+  }
   ctx.fillStyle = c.area;
   ctx.fillRect(0, 0, width, height);
   if (opts.grid !== false) {
@@ -82,17 +97,15 @@ export function drawWorld(ctx, view, scene, opts = {}) {
     }
     ctx.stroke();
   }
-  ctx.strokeStyle = c.muted;
-  ctx.lineWidth = 1.5 / scale;
-  ctx.strokeRect(0, 0, width, height);
 
-  const px = (n) => n / scale; // screen pixels -> world units
-  const objects = scene.objects ?? [];
+  if (!shape) {
+    ctx.strokeStyle = c.muted;
+    ctx.lineWidth = 1.5 / scale;
+    ctx.strokeRect(0, 0, width, height);
 
-  // reachable working areas of the handles
-  if (scene.areas) {
+    // reachable working areas of the handles
     for (const [key, color] of [['it', c.it], ['me', c.me]]) {
-      const pts = scene.areas[key];
+      const pts = scene.areas?.[key];
       if (!pts?.length) continue;
       ctx.beginPath();
       pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
@@ -107,60 +120,19 @@ export function drawWorld(ctx, view, scene, opts = {}) {
     }
   }
 
-  // Active view preset boundary indicator
-  const viewMode = opts.viewMode ?? scene.viewMode;
-  if (viewMode === 'square') {
-    const sq = EDITOR_VIEWS.square.box;
-    ctx.save();
-    ctx.fillStyle = hexA(c.select, 0.03);
-    ctx.fillRect(sq.x, sq.y, sq.w, sq.h);
-    ctx.setLineDash([px(5), px(4)]);
-    ctx.strokeStyle = hexA(c.select, 0.85);
-    ctx.lineWidth = px(1.5);
-    ctx.strokeRect(sq.x, sq.y, sq.w, sq.h);
-    ctx.setLineDash([]);
-    ctx.strokeStyle = c.select;
-    ctx.lineWidth = px(2.5);
-    const blen = px(10);
-    ctx.beginPath();
-    // top-left
-    ctx.moveTo(sq.x, sq.y + blen); ctx.lineTo(sq.x, sq.y); ctx.lineTo(sq.x + blen, sq.y);
-    // top-right
-    ctx.moveTo(sq.x + sq.w - blen, sq.y); ctx.lineTo(sq.x + sq.w, sq.y); ctx.lineTo(sq.x + sq.w, sq.y + blen);
-    // bottom-right
-    ctx.moveTo(sq.x + sq.w, sq.y + sq.h - blen); ctx.lineTo(sq.x + sq.w, sq.y + sq.h); ctx.lineTo(sq.x + sq.w - blen, sq.y + sq.h);
-    // bottom-left
-    ctx.moveTo(sq.x + blen, sq.y + sq.h); ctx.lineTo(sq.x, sq.y + sq.h); ctx.lineTo(sq.x, sq.y + sq.h - blen);
-    ctx.stroke();
-    if (opts.labels !== false) label(ctx, 'Biggest Square (83 × 83 mm)', sq.x + sq.w / 2, sq.y - px(6), c.select, px);
-    ctx.restore();
-  } else if (viewMode === 'both') {
-    const b = EDITOR_VIEWS.both.box;
-    ctx.save();
-    ctx.setLineDash([px(5), px(4)]);
-    ctx.strokeStyle = hexA(c.zone, 0.75);
-    ctx.lineWidth = px(1.5);
-    ctx.strokeRect(b.x, b.y, b.w, b.h);
-    ctx.setLineDash([]);
-    if (opts.labels !== false) label(ctx, 'Covered by both (172 × 160 mm)', b.x + b.w / 2, b.y - px(6), c.zone, px);
-    ctx.restore();
-  } else if (viewMode === 'single') {
-    const b = EDITOR_VIEWS.single.box;
-    ctx.save();
-    ctx.setLineDash([px(5), px(4)]);
-    ctx.strokeStyle = hexA(c.muted, 0.75);
-    ctx.lineWidth = px(1.5);
-    ctx.strokeRect(b.x, b.y, b.w, b.h);
-    ctx.setLineDash([]);
-    if (opts.labels !== false) label(ctx, 'Max zoom · single handles (277 × 177 mm)', b.x + b.w / 2, b.y - px(6), c.muted, px);
-    ctx.restore();
-  }
-
   // zones first (background)
   for (const o of objects) if (o.type === 'zone') drawZone(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'rail') drawRail(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'wall') drawWall(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'entity') drawEntity(ctx, o, c, px, opts);
+
+  if (shape) {
+    ctx.restore(); // end of the clip
+    outline();
+    ctx.strokeStyle = c.muted;
+    ctx.lineWidth = px(2);
+    ctx.stroke();
+  }
 
   // spawn markers (level editor)
   if (scene.spawn) {

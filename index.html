@@ -52,8 +52,13 @@
       <span class="brand-name">DualPanto <b>Studio</b></span>
     </div>
     <div class="project">
-      <label class="sr-only" for="project-name">Project name</label>
-      <input id="project-name" class="project-name" type="text" autocomplete="off" />
+      <div class="project-switch">
+        <button id="project-switch" class="project-switch-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu" title="Switch project">
+          <span id="project-name" class="project-name"></span>
+          <span class="caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="project-menu" class="menu" role="menu" hidden></div>
+      </div>
       <span id="save-state" class="save-state" aria-live="polite">Saved</span>
     </div>
     <nav class="file-actions" aria-label="Project">
@@ -63,72 +68,55 @@
     </nav>
     <div class="spacer"></div>
     <div class="device">
-      <span id="device-status" class="pill" data-state="emulator">Emulator</span>
-      <button id="voice-status" class="pill pill-voice" data-state="off" hidden title="Turn the microphone on or off">🎤 off</button>
       <label class="check small" title="Restart the device when connecting (recommended)"><input id="opt-reset" type="checkbox" checked /> Reset</label>
       <label class="check small" title="Create the edge of the Me area as a wall on start (many packets – leave off for testing)"><input id="opt-boundary" type="checkbox" /> Boundary</label>
       <button id="btn-connect" class="btn btn-secondary">Connect device</button>
       <button id="btn-selftest" class="btn btn-ghost" title="Create and enable a single test wall">Self-test</button>
+      <span id="device-status" class="pill" data-state="emulator">Emulator</span>
     </div>
     <div class="run">
       <button id="btn-run" class="btn btn-primary" title="Ctrl/⌘ + Enter">▶ Run</button>
-      <button id="btn-restart" class="btn btn-secondary" hidden title="Ctrl/⌘ + Enter">↻ Restart</button>
-      <button id="btn-stop" class="btn btn-stop" hidden>■ Stop</button>
     </div>
   </header>
 
-  <main class="workspace">
-    <aside class="sidebar" aria-label="Project contents">
+  <main id="workspace" class="workspace">
+    <aside id="pane-left" class="sidebar" aria-label="Project contents">
       <div class="side-section">
         <div class="side-head"><span>Program</span></div>
-        <button id="nav-script" class="nav-item active">
+        <button id="nav-script" class="nav-item active" title="Show the main script in the code editor">
           <span class="file-icon" aria-hidden="true">JS</span> Script
         </button>
       </div>
-      <div class="side-section grow">
+      <div id="levels-pane" class="side-section side-levels">
         <div class="side-head">
           <span>Levels</span>
           <button id="btn-add-level" class="icon-btn" title="Add level" aria-label="Add level">＋</button>
         </div>
-        <ul id="level-list" class="level-list"></ul>
+        <ol id="level-list" class="level-list"></ol>
       </div>
-      <div class="side-section" id="sound-section">
-        <div class="side-head">
-          <span>Sounds</span>
-          <button id="btn-add-sound" class="icon-btn" title="Upload MP3 or WAV" aria-label="Upload sound">＋</button>
-        </div>
-        <ul id="sound-list" class="sound-list"></ul>
-        <input id="file-sound" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a" multiple hidden />
-      </div>
+      <button class="resize-handle resize-y" data-resize="levels" type="button" role="separator" aria-orientation="horizontal" aria-label="Resize levels and properties" title="Drag to resize levels and properties"></button>
+      <div id="props" class="props" aria-label="Properties"></div>
       <div class="side-foot muted small">
         <div id="storage-hint">Everything is saved in the browser automatically. Under "Projects" you can export a file.</div>
         <div id="storage-info" class="storage-info"></div>
       </div>
     </aside>
+
     <button class="resize-handle resize-x" data-resize="sidebar" type="button" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize sidebar"></button>
 
-    <section class="center" aria-labelledby="center-title">
+    <section id="pane-center" class="center" aria-labelledby="center-title">
       <div class="center-head">
-        <h2 id="center-title">Script</h2>
-        <div id="level-tabs" class="level-tabs" role="tablist" hidden>
-          <button class="subtab active" role="tab" data-sub="level" aria-selected="true">Level</button>
-          <button class="subtab" role="tab" data-sub="script" aria-selected="false">Script</button>
+        <h2 id="center-title">Level</h2>
+        <div id="area-modes" class="segmented" role="radiogroup" aria-label="Work area">
+          <button role="radio" data-area="square" aria-checked="false" title="Largest square both handles can reach (1)">Square</button>
+          <button role="radio" data-area="rhombus" aria-checked="false" title="Largest rhombus both handles can reach (2)">Rhombus</button>
+          <button role="radio" data-area="full" aria-checked="true" title="The full reachable areas of Me and It (0)">Full area</button>
         </div>
         <div class="spacer"></div>
-        <div id="level-opts" class="level-opts" hidden>
-          <div class="view-group" role="group" aria-label="Editor view">
-            <label class="view-label" for="select-view">View</label>
-            <select id="select-view" class="select-view" title="Choose editor view preset">
-              <option value="square" title="The biggest square covered by the range of the Me and It handle (83 × 83 mm)" selected>Biggest square (Me & It)</option>
-              <option value="both" title="The whole area covered by both the Me and It handle (172 × 160 mm)">Covered by both (Me & It)</option>
-              <option value="single" title="Maximum zoom with areas reached by only one of the handles (277 × 177 mm)">Single handles (max zoom)</option>
-              <option value="full" title="Full workspace (360 × 210 mm)">Full workspace</option>
-              <option value="custom" disabled hidden>Custom view</option>
-            </select>
-          </div>
+        <div id="level-opts" class="level-opts">
           <div class="zoom-group" role="group" aria-label="Zoom">
             <button id="btn-zoom-out" class="icon-btn" title="Zoom out (−)" aria-label="Zoom out">−</button>
-            <button id="btn-zoom-level" class="zoom-value" title="Reset view (1 for square, 0 for full area)">100 %</button>
+            <button id="btn-zoom-level" class="zoom-value" title="Show the whole area">100 %</button>
             <button id="btn-zoom-in" class="icon-btn" title="Zoom in (+)" aria-label="Zoom in">＋</button>
             <button id="btn-zoom-fit" class="icon-btn" title="Zoom to selection (F)" aria-label="Zoom to selection">⤢</button>
           </div>
@@ -136,62 +124,116 @@
           <button id="btn-undo" class="icon-btn" title="Undo (Ctrl/⌘+Z)" aria-label="Undo">↶</button>
           <button id="btn-redo" class="icon-btn" title="Redo (Ctrl/⌘+Shift+Z)" aria-label="Redo">↷</button>
         </div>
-        <span id="script-hint" class="muted small">Ctrl/⌘ + Enter runs</span>
       </div>
-      <div id="view-script" class="view">
+      <div id="view-level" class="view">
+        <div class="level-toolbar">
+          <div id="tools" class="tools" role="toolbar" aria-label="Tools"></div>
+          <div class="spacer"></div>
+          <button id="btn-clear-level" class="btn btn-clear" title="Remove all objects of this level (undo brings them back)">Clear</button>
+        </div>
+        <div class="level-canvas-wrap">
+          <canvas id="level-canvas" class="level-canvas" data-no-runtime-keys aria-label="Level editor"></canvas>
+          <p id="tool-hint" class="tool-hint"></p>
+        </div>
+      </div>
+      <div id="view-empty" class="view view-empty" hidden>
+        <p class="muted">This project has no levels. Apps don't necessarily need one.</p>
+        <button id="btn-add-level-empty" class="btn btn-secondary">＋ Add level</button>
+      </div>
+    </section>
+
+    <button class="resize-handle resize-x" data-resize="right" type="button" role="separator" aria-orientation="vertical" aria-label="Resize level editor and code" title="Drag to resize level editor and code"></button>
+
+    <section id="pane-right" class="right" aria-label="Code, sounds and console">
+      <div id="code-pane" class="code-pane">
+        <div class="pane-head">
+          <h2 id="code-title">Main script</h2>
+          <div id="code-target" class="segmented" role="radiogroup" aria-label="Script">
+            <button role="radio" data-code="main" aria-checked="true">Main</button>
+            <button role="radio" data-code="level" aria-checked="false">Level</button>
+          </div>
+          <div class="spacer"></div>
+          <span id="script-hint" class="muted small">Ctrl/⌘ + Enter runs</span>
+        </div>
         <div id="code" class="code">
           <div id="code-loading" class="code-loading muted">Loading editor …</div>
         </div>
       </div>
-      <div id="view-level" class="view" hidden>
-        <div class="level-toolbar">
-          <div id="tools" class="tools" role="toolbar" aria-label="Tools"></div>
+      <button class="resize-handle resize-y" data-resize="code" type="button" role="separator" aria-orientation="horizontal" aria-label="Resize code and sounds" title="Drag to resize code and sounds"></button>
+      <div id="bottom-pane" class="bottom-pane">
+        <div class="tabs" role="tablist">
+          <button class="tab active" role="tab" data-tab="sounds" aria-selected="true">Sounds</button>
+          <button class="tab" role="tab" data-tab="console" aria-selected="false">Console</button>
+          <button class="tab" role="tab" data-tab="api" aria-selected="false">API</button>
+          <div class="spacer"></div>
+          <label class="check small tab-opt"><input id="opt-devicelog" type="checkbox" /> Device log</label>
+          <button id="btn-clear" class="link-btn small" title="Clear the console">Clear</button>
         </div>
-        <div class="level-body">
-          <div class="level-canvas-wrap">
-            <canvas id="level-canvas" class="level-canvas" data-no-runtime-keys aria-label="Level editor"></canvas>
-            <p id="tool-hint" class="tool-hint"></p>
+        <div id="tab-sounds" class="tab-body sounds" role="tabpanel">
+          <div class="sound-tabs">
+            <span class="sound-tabs-label">Sounds:</span>
+            <div class="segmented" role="tablist" aria-label="Sound source">
+              <button role="tab" data-sound="library" aria-selected="true">Library</button>
+              <button role="tab" data-sound="record" aria-selected="false">Record</button>
+              <button role="tab" data-sound="tts" aria-selected="false">TTS</button>
+              <button role="tab" data-sound="upload" aria-selected="false">Upload</button>
+            </div>
+            <div class="spacer"></div>
+            <button id="btn-add-sound" class="btn btn-secondary btn-sm" title="Upload MP3 or WAV">Add Sounds</button>
+            <input id="file-sound" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a" multiple hidden />
           </div>
-          <button class="resize-handle resize-x level-resize" data-resize="props" type="button" role="separator" aria-orientation="vertical" aria-label="Resize level properties" title="Drag to resize properties"></button>
-          <div id="props" class="props" aria-label="Properties"></div>
+          <div class="sound-panel freesound" data-sound-panel="library">
+            <form id="freesound-form" class="freesound-toolbar">
+              <label class="freesound-query-label">Search effects
+                <input id="freesound-query" type="search" placeholder="e.g. door slam, footsteps" autocomplete="off" />
+              </label>
+              <button class="btn btn-primary" type="submit">Search</button>
+            </form>
+            <div id="freesound-status" class="muted small" role="status"></div>
+            <div id="freesound-results" class="freesound-results"></div>
+            <button id="btn-freesound-more" class="btn btn-secondary" type="button" hidden>Load more</button>
+            <p class="muted small library-source">Source: Freesound.org</p>
+          </div>
+          <div class="sound-panel placeholder" data-sound-panel="record" hidden>
+            <p class="muted">Record sounds with the microphone – coming soon.</p>
+          </div>
+          <div class="sound-panel placeholder" data-sound-panel="tts" hidden>
+            <p class="muted">Turn text into a sound clip – coming soon.</p>
+          </div>
+          <div class="sound-panel" data-sound-panel="upload" hidden>
+            <ul id="sound-list" class="sound-list"></ul>
+          </div>
         </div>
-      </div>
-    </section>
-    <button class="resize-handle resize-x" data-resize="right" type="button" role="separator" aria-orientation="vertical" aria-label="Resize preview and editor" title="Drag to resize preview and editor"></button>
-
-    <section class="right" aria-label="Preview and console">
-      <div class="stage-wrap">
-        <canvas id="stage" class="stage" tabindex="0" aria-label="Live preview"></canvas>
-        <div id="stage-hint" class="stage-hint">Me: drag · It: Shift + drag · dashed: reachable area</div>
-      </div>
-      <button class="resize-handle resize-y" data-resize="console" type="button" role="separator" aria-orientation="horizontal" aria-label="Resize preview and console" title="Drag to resize preview and console"></button>
-      <div class="tabs" role="tablist">
-        <button class="tab active" role="tab" data-tab="console" aria-selected="true">Console</button>
-        <button class="tab" role="tab" data-tab="api" aria-selected="false">API</button>
-        <button class="tab" role="tab" data-tab="freesound" aria-selected="false">Sound Library</button>
-        <div class="spacer"></div>
-        <label class="check small tab-opt"><input id="opt-devicelog" type="checkbox" /> Device log</label>
-        <button id="btn-clear" class="link-btn small">Clear</button>
-      </div>
-      <div id="tab-console" class="tab-body" role="tabpanel">
-        <ol id="console-list" class="console" aria-live="polite"></ol>
-      </div>
-      <div id="tab-api" class="tab-body api" role="tabpanel" hidden>
-        <div id="api-doc" class="api-doc"></div>
-      </div>
-      <div id="tab-freesound" class="tab-body freesound" role="tabpanel" hidden>
-        <form id="freesound-form" class="freesound-toolbar">
-          <label class="freesound-query-label">Search effects
-            <input id="freesound-query" type="search" placeholder="e.g. door slam, footsteps" autocomplete="off" />
-          </label>
-          <button class="btn btn-primary" type="submit">Search</button>
-        </form>
-        <div id="freesound-status" class="muted small" role="status"></div>
-        <div id="freesound-results" class="freesound-results"></div>
-        <button id="btn-freesound-more" class="btn btn-secondary" type="button" hidden>Load more</button>
+        <div id="tab-console" class="tab-body" role="tabpanel" hidden>
+          <ol id="console-list" class="console" aria-live="polite"></ol>
+        </div>
+        <div id="tab-api" class="tab-body api" role="tabpanel" hidden>
+          <div id="api-doc" class="api-doc"></div>
+        </div>
       </div>
     </section>
   </main>
+
+  <div id="run-view" class="run-view" hidden>
+    <header class="run-bar">
+      <span class="logo" aria-hidden="true"></span>
+      <strong id="run-title" class="run-title"></strong>
+      <span id="run-level" class="muted small"></span>
+      <div class="spacer"></div>
+      <button id="voice-status" class="pill pill-voice" data-state="off" hidden title="Turn the microphone on or off">🎤 off</button>
+      <span id="run-device" class="pill" data-state="emulator">Emulator</span>
+      <button id="btn-restart" class="btn btn-secondary" title="Ctrl/⌘ + Enter">↻ Restart</button>
+      <button id="btn-stop" class="btn btn-stop" title="Stop and go back to the editor">■ Stop <kbd>Esc</kbd></button>
+    </header>
+    <div class="stage-wrap">
+      <canvas id="stage" class="stage" tabindex="0" aria-label="Live preview"></canvas>
+      <div id="stage-hint" class="stage-hint">Me: drag · It: Shift + drag</div>
+    </div>
+    <details id="run-console" class="run-console">
+      <summary>Console <span id="run-console-count" class="muted small"></span></summary>
+      <ol id="run-console-list" class="console"></ol>
+    </details>
+  </div>
 
   <dialog id="dlg-new" class="dialog">
     <div class="dialog-head">

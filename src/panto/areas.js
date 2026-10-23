@@ -21,6 +21,8 @@ export const EMBER_AREAS = { me: pts(ME), it: pts(IT) };
 /**
  * Standard editor view presets:
  * - square: The biggest square covered by the range of both Me and It handles (83 × 83 mm).
+ * - rhombus: The biggest rhombus covered by both handles (diagonals 152.5 × 143.5 mm, axis-aligned,
+ *   found by a grid search over centres and aspect ratios, 1 mm inside the outlines).
  * - both: The whole area covered by both Me and It handles (172 × 160 mm).
  * - single: Maximum zoom containing the areas reached by only one of the handles (277 × 177 mm).
  * - full: Full device workspace (360 × 210 mm).
@@ -31,6 +33,13 @@ export const EDITOR_VIEWS = {
     label: 'Biggest square (Me & It)',
     title: 'The biggest square covered by the range of the Me and It handle (83 × 83 mm)',
     box: { x: 138.7, y: 61.9, w: 82.6, h: 82.6 },
+  },
+  rhombus: {
+    key: 'rhombus',
+    label: 'Biggest rhombus (Me & It)',
+    title: 'The biggest rhombus covered by the range of the Me and It handle (152 × 143 mm)',
+    box: { x: 103.5, y: 26, w: 152.5, h: 143.5 },
+    points: pts([[180, 26], [256, 97.5], [180, 169.5], [103.5, 97.5]]),
   },
   both: {
     key: 'both',
@@ -51,3 +60,14 @@ export const EDITOR_VIEWS = {
     box: { x: 0, y: 0, w: 360, h: 210 },
   },
 };
+
+/**
+ * The outline a level is restricted to ("view": "square" or "rhombus"), or null for the
+ * full area. `{ points, x, y, width, height }` in world mm.
+ */
+export function workAreaFor(view) {
+  if (view !== 'square' && view !== 'rhombus') return null;
+  const { box, points } = EDITOR_VIEWS[view];
+  const outline = points ?? pts([[box.x, box.y], [box.x + box.w, box.y], [box.x + box.w, box.y + box.h], [box.x, box.y + box.h]]);
+  return { points: outline, x: box.x, y: box.y, width: box.w, height: box.h };
+}

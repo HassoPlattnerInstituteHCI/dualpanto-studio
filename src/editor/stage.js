@@ -2,6 +2,7 @@
 // lets you drive the emulated handles with the mouse.
 
 import { fitView, drawWorld } from './renderer.js';
+import { workAreaFor } from '../panto/areas.js';
 
 export class Stage {
   constructor({ canvas, getDevice, getRuntime, getPreviewLevel }) {
@@ -73,15 +74,21 @@ export class Stage {
     if (!this.canvas.clientWidth || this.canvas.offsetParent === null) return;
     const device = this.getDevice();
     const bounds = device?.bounds ?? { width: 360, height: 210 };
-    this.view = fitView(this.canvas, bounds, 14);
+    const areas = device?.profile?.areas;
     const rt = this.getRuntime();
     let scene;
     if (rt?.running) {
-      scene = { objects: [...rt.objects.values()], handles: this._withFollow(rt), caption: rt.caption, heard: rt.heard, areas: device?.profile?.areas };
+      scene = { objects: [...rt.objects.values()], handles: this._withFollow(rt), caption: rt.caption, heard: rt.heard, areas };
+      scene.workArea = workAreaFor(rt.level?.data?.view);
     } else {
       const level = this.getPreviewLevel();
-      scene = { objects: level?.objects ?? [], spawn: level?.spawn, handles: this.handles, areas: device?.profile?.areas };
+      scene = { objects: level?.objects ?? [], spawn: level?.spawn, handles: this.handles, areas, workArea: workAreaFor(level?.view) };
     }
+    // a square/rhombus level fills the view, with some room around it: the handles can still leave it
+    const w = scene.workArea;
+    const pad = 15;
+    const focus = w ? { x: w.x - pad, y: w.y - pad, width: w.width + pad * 2, height: w.height + pad * 2 } : undefined;
+    this.view = fitView(this.canvas, bounds, 14, { focus });
     drawWorld(this.ctx, this.view, scene, { labels: true });
   }
 }
