@@ -99,7 +99,7 @@ Everything in a level has to be reachable with both handles. "Full area" shows t
 - **Level editor:** walls (as a polyline or closed shape), boxes, rails (hallways), rectangular and round zones, **enemies and items**, start positions for Me and It, grid, undo/redo, Clear (removes all objects, undo brings them back), work area Square/Rhombus/Full area and a properties panel with a "use in script" code snippet.
 - **Enemies, items and custom objects (entities):** visible objects in the scene that react when a handle comes within their radius. They are **not** attached to the device: they are drawn in the editor and the run view, and only felt if you explicitly want that (`solid: true` creates a round wall, `attachTo("it")` keeps sending the It handle there). Without a single line of code an item disappears and beeps when touched and an enemy buzzes; a text under "Say on touch" is spoken, a selected sound is played.
 - **Work area and zoom in the level editor:** keys `1` Square, `2` Rhombus, `0` Full area. Square and Rhombus are fixed in place (see "Work area" above). In Full area, the mouse wheel or pinch zooms towards the pointer and dragging empty space (or with the middle mouse button or Space held) pans; keys `+`, `−`, `F` for the selection.
-- **Attaching a handle to an object:** `it.switchTo(enemy)` moves the It handle to the object and keeps it attached – when the object moves, the handle moves along (0.8 mm lag, smooth; tuning knobs: `ease`, `hz`, `smooth`, `lead`). This is the counterpart to `PantoHandle.SwitchTo` in the Unity toolkit and the way to make an enemy tangible. The target can be an enemy/item, a zone, the other handle, a point or a function; `me.switchTo(...)` guides the person's hand. `it.stopFollow()` and `it.free()` end it.
+- **Attaching a handle to an object:** `it.switchTo(enemy)` moves the It handle to the object and keeps it attached – when the object moves, the handle moves along, matching Unity `PantoHandle.SwitchTo`, and making the enemy tangible. The target can be an enemy/item, a zone, the other handle, a point or a function; `me.switchTo(...)` guides the person's hand. `it.stopFollow()` and `it.free()` end it.
 - **Objects at runtime:** walls, boxes, circles, rails, zones, enemies and items can be created, enabled, disabled and removed in the script at any time – on start, in a timer, in `onFrame`, in response to a zone, a key or a voice command. Find them again by name with `level.object/zone/entity` or `panto.find` (also in the main script). What a level script creates disappears when the level changes; what the main script creates stays. On the device every obstacle costs packets (CREATE + one packet per point + ENABLE, 10 ms apart each), so for frequent changes it is better to create once and only use enable/disable; zones and entities cost nothing.
 - **Multiple levels:** the sidebar shows all levels as a slide overview. `panto.loadLevel()` and `panto.nextLevel()` switch levels. Objects, zones, timers and key handlers a level creates are cleaned up automatically on the switch. `state` is kept.
 - **Scripts:** one **main script** (intro, score, level control, global keys) and one **level script** per level (select the level, then "Level" in the code editor's header). In the level script, `level` is defined; everything it creates is cleaned up when the level changes. Errors in the console link to the right file and line.
@@ -193,41 +193,19 @@ Emulator and device share the same interface (`createObstacle`, `createRail`, `m
 
 ## A handle follows an object
 
-In the Unity toolkit this is `PantoHandle.SwitchTo(gameObject)`: move there once, after that `FixedUpdate` re-sends the target position every physics frame. In the Studio it is called `switchTo` (alias `follow`):
+`switchTo` issues a position command and waits for the device transition callback, like Unity's `PantoHandle.SwitchTo`. It then keeps updating the target position so the handle follows a moving object. If no transition callback arrives, tracking begins after 3 seconds, matching Unity's timeout. The target may be an entity, zone, the other handle, a point, or a function returning a point. The device ignores positions outside its rectangular working bounds.
 
 ```js
 const enemy = level.entity("Guard");
 enemy.patrol([[150, 80], [210, 140]], { speed: 60 });
-await it.switchTo(enemy);         // moves there; the promise resolves on arrival
-it.isFollowing; it.followName;    // true, "Guard"
-it.stopFollow();                  // stay put    it.free() = let go
+await it.switchTo(enemy);          // resolves on transition end or timeout
+it.stopFollow();                   // stop tracking; keep the current motor state
+it.free();                         // release the handle
+await me.moveTo({ x: 180, y: 100 }); // release after the move
+await me.moveTo(enemy, { shouldFreeHandle: false }); // freeze after the move
 ```
 
-The target may be an enemy or item, a zone (its centre), the other handle, a point – or a function that returns a point (`it.switchTo(() => ({ x: 200, y: 110 + panto.time }))`). If the target leaves the handle's reachable area, the handle stays at the nearest reachable point and the console warns once. In the run view a dashed line shows which object a handle is attached to.
-
-### Keeping the handle smooth
-
-The firmware moves the god object to the target in `1 / SPEED` seconds. Two consequences follow, both of which we measured (emulator, target at a constant 60 mm/s, metrics from the device's position events):
-
-- **Setting the duration only once** (as the toolkit does) → the handle crawls behind: 50–70 mm lag with a target moving at 60 mm/s.
-- **Duration = one update interval** → every move is over before the next target arrives. The handle stands still 26 % of the time and pulses at the update rate (measured 32–46 acceleration changes/s). On the device this feels like vibration.
-
-So by default a move lasts **2.5 intervals** (`ease`); the moves overlap and the speed stays even. The lag this causes is compensated by a **lead** (`lead`: aim where the target will be at the end of the move), and a noisy target is **smoothed** (`smooth`; the target velocity for the lead comes from the smoothed history, otherwise the noise feeds back in). Result with the defaults: **0.8 mm lag, 3 acceleration changes/s, no standstill** instead of 1.3 mm / 32 / 26 %.
-
-```js
-it.switchTo(enemy, {
-  speed: 150,     // upper limit mm/s – for the approach and for jumps of the target
-  hz: 20,         // updates per second
-  ease: 2.5,      // move duration in intervals: larger = calmer, more sluggish
-  smooth: 0.25,   // smoothing of the target (if the target is a handle: 0.6)
-  lead: 0.6,      // lead against the lag
-  deadzone: 1,    // only send once the target has moved 1 mm
-});
-```
-
-If it still twitches on the device: `ease` to 3–4, `hz` to 12–15. If the handle lags too far behind: lower `ease` (not below 1.5) or set `lead` to 1. If the target jitters (the person's hand): `smooth` to 0.6–0.8. With the defaults, about 17 position packets per second are sent (toolkit: 50), and only while the target moves.
-
-**The emulator used to tween every move from standstill** (`easeInOut` starts at velocity 0). With a continuously updated target it therefore pulsed more than the real mechanics. It now carries over the initial velocity (Hermite interpolation: starts with the current velocity, ends at rest) – a single `moveTo` looks the same as before.
+`speed` controls movement (default 1, capped at 100). `moveTo` is the `MoveToPosition` counterpart: after the transition it stops tracking and frees the handle by default, or freezes it when `shouldFreeHandle` is false.
 
 ## Coordinates
 
@@ -240,7 +218,7 @@ The handles only reach part of the 360 × 210 mm, and Me and It reach differentl
 The outlines are in `src/panto/areas.js`. They come from `ember_area.svg` in the Unity toolkit (`EmberWorkingArea` in the Panto prefab: plane, scale 3.8, rotated 180°). Which outline belongs to which handle was checked against the kinematics in `ember.json`: about 98 % of each outline is reachable by its assigned handle, but only 63 % by the other handle.
 
 - The **emulator** does not let the handles leave their area.
-- `moveTo` to unreachable points moves to the nearest reachable point and warns once in the console.
+- Level editor positions are constrained to the selected work area; script handle commands outside the device bounds are ignored by the hardware.
 - The edge of the Me area can be created as a wall on start ("Boundary" switch at the top, project setting `boundary`). **Off** by default: the outline costs one packet per point, and on the device the level's obstacles should arrive first. If Me is outside when it is switched on, the handle moves inside first.
 - When a level loads, the console warns about zones, rails and start positions outside. Walls may stick out over the edge.
 - Script API: `me.canReach(p)`, `panto.canReach(p, "both")`, `panto.area("it")`, `randomPoint(margin, handle)`.
@@ -256,7 +234,7 @@ Source is `dualpantoframework` (as of July 2026): `documentation/protocol`, `uti
 - **Every `SYNC_ACK` calls `GodObject::reset()` in the firmware and deletes all obstacles.** The firmware sends a SYNC every 10 ms until the ACK arrives, so after connecting a few are usually still in flight. The app therefore only acknowledges the first one. If another SYNC arrives later, the device has restarted, and the running app sends all obstacles again.
 - **Never reuse obstacle IDs.** `REMOVE_OBSTACLE` deletes later in the firmware (action queue, one action per physics frame). If a new program run ("Restart") started at ID 1 again, a still-pending delete could remove the new obstacle. IDs therefore keep counting per connection.
 - After sending, the console reports what the device acknowledged, e.g. "Obstacles acknowledged: 2 created, 2 enabled".
-- Motor speed (`0x92`) in the firmware is 1 / duration in seconds, not a speed. `moveTo({speed})` converts mm/s accordingly.
+- Motor speed (`0x92`) in the firmware is 1 / transition duration in seconds. The JS handle API passes its `speed` option through as the device speed, matching the Unity toolkit.
 - **Possible bug in the Unity plugin:** `CppLib::createPassableObstacle` (`utils/serial/src/cppLib/lib.cpp`) does not write the panto index. The packet therefore has 18 instead of 19 bytes and is dropped with "INVALID PACKET". Passable obstacles probably never reach the device. The web app sends the index.
 
 ## If the page loads but nothing works

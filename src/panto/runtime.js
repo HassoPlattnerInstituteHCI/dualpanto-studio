@@ -68,6 +68,9 @@ export class Runtime extends Emitter {
   // ---- lifecycle --------------------------------------------------------
   async start() {
     this.running = true;
+    // Obstacles uploaded during setup stay disabled until any level start
+    // positions have been physically confirmed.
+    this._deferObstacleActivation = true;
     const d = this.device;
     this._unsub.push(
       d.on('position', (hs) => this._onPosition(hs)),
@@ -98,6 +101,7 @@ export class Runtime extends Emitter {
     if (this.running && !this.level) {
       const first = this.project.startLevel ?? this.project.levels?.[0]?.name;
       if (first) await this.loadLevel(first);
+      else this._activateDeferredObstacles();
     }
   }
 
@@ -116,8 +120,9 @@ export class Runtime extends Emitter {
     this._globalScope.dispose();
     for (const id of [...this.objects.keys()]) this.objects.delete(id);
     for (const h of this.handles) {
-      h._follow = null;
+      h._target = null;
       h._transition?.resolve(false);
+      h.inTransition = false;
       try {
         this.device.free(h.index);
       } catch {}
@@ -389,7 +394,7 @@ export class Runtime extends Emitter {
       handle._pos = { x: h.x, y: h.y };
       handle._god = { ...h.god };
       handle._rot = h.rot;
-      handle._transition?.checkPosition?.();
+      handle._hasPosition = true;
       if (moved) for (const fn of handle._moveListeners) fn(handle.position);
     });
     this._checkZones();
@@ -711,11 +716,26 @@ export class Runtime extends Emitter {
     // Establish the spawn positions before running any level logic. A level
     // script can immediately start patrols, following, or other handle moves;
     // those commands would supersede the spawn move if the script ran first.
-    const moves = [];
-    if (data.spawn?.me) moves.push(this.me.moveTo(data.spawn.me, { speed: 250 }));
-    if (data.spawn?.it) moves.push(this.it.moveTo(data.spawn.it, { speed: 250 }));
-    await Promise.all(moves);
+    const spawnMoves = [];
+    if (data.spawn?.me) spawnMoves.push({ handle: this.me, point: toPoint(data.spawn.me) });
+    if (data.spawn?.it) spawnMoves.push({ handle: this.it, point: toPoint(data.spawn.it) });
+    await Promise.all(spawnMoves.map(({ handle, point }) => handle.switchTo(point)));
     if (loadToken !== this._levelLoadToken || !this.running) return level;
+
+    // A transition callback can arrive before the matching position packet, and
+    // some firmware versions omit it. Confirm measured positions before the
+    // level's obstacles are enabled; a failed spawn leaves them safely disabled.
+    for (const { handle, point } of spawnMoves) {
+      const reached = await this._waitForSpawnPosition(handle, point, loadToken);
+      if (loadToken !== this._levelLoadToken || !this.running) return level;
+      if (!reached) {
+        this.log('error', `Level "${name}": ${handle.name} did not reach its start position; obstacles remain disabled.`);
+        return level;
+      }
+    }
+    // SwitchTo keeps a position target active. Once both starts are physically
+    // confirmed, release those handles before introducing the level obstacles.
+    for (const { handle } of spawnMoves) handle.free();
 
     // a level built in code (panto.defineLevel): run its builder in the level scope
     if (code) {
@@ -746,15 +766,28 @@ export class Runtime extends Emitter {
     for (const h of this._levelHandlers) {
       if (h.name == null || h.name === name) h.fn(level);
     }
-    if (loadToken === this._levelLoadToken) {
-      this._deferObstacleActivation = false;
-      for (const o of this.objects.values()) {
-        if (o.enabled && !o.removed && o.deviceIds) {
-          for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
-        }
+    if (loadToken === this._levelLoadToken) this._activateDeferredObstacles();
+    return level;
+  }
+
+  _activateDeferredObstacles() {
+    this._deferObstacleActivation = false;
+    for (const o of this.objects.values()) {
+      if (o.enabled && !o.removed && o.deviceIds) {
+        for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
       }
     }
-    return level;
+  }
+
+  async _waitForSpawnPosition(handle, point, loadToken, timeoutMs = 5000) {
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + timeoutMs;
+    while (this.running && loadToken === this._levelLoadToken) {
+      if (handle._hasPosition && dist(handle._pos, point) <= 3) return true;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return false;
   }
 
   levelNames() {
@@ -971,6 +1004,21 @@ export class Runtime extends Emitter {
       },
       get device() {
         return rt.device.kind;
+      },
+      /** Configure the device speed-control mode (Unity Settings counterpart). */
+      setSpeedControl: (options = {}) => {
+        const strategy = options.speedControlOption ?? options.strategy ?? 0;
+        const strategyId = typeof strategy === 'string'
+          ? ({ MAX_SPEED: 0, EXPLORATION: 1, LEASH: 2 }[strategy.toUpperCase()] ?? 0)
+          : Number(strategy) || 0;
+        rt.device.setSpeedControl({
+          tethered: options.tetheringEnabled ?? options.tethered ?? false,
+          factor: options.tetherFactor ?? options.factor ?? 0,
+          inner: options.innerRadius ?? options.inner ?? 0,
+          outer: options.outerRadius ?? options.outer ?? 0,
+          strategy: strategyId,
+          pock: options.pockEnabled ?? options.pock ?? false,
+        });
       },
       /** Working area of a handle: { points, contains(p) } */
       area: (handle = 'me') => {

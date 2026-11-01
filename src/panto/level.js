@@ -71,4 +71,27 @@ export class Level {
   get spawn() {
     return this.data.spawn ?? {};
   }
+
+  /**
+   * Browser counterpart of Unity Level.PlayIntroduction. Entities may define
+   * description, priority, isOnUpper and outline (ordered contour points).
+   */
+  async playIntroduction({ introductionSpeed = 10, msDelayBetweenObjects = 200 } = {}) {
+    const pointsOfInterest = this._scene('entity')
+      .filter((entity) => entity.description)
+      .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0));
+
+    for (const entity of pointsOfInterest) {
+      if (!this._rt.running) return;
+      const handle = entity.isOnUpper ? this._rt.me : this._rt.it;
+      const movement = entity.traceShape && Array.isArray(entity.outline) && entity.outline.length
+        ? handle.traceObjectByPoints(entity.outline, introductionSpeed)
+        : handle.switchTo(entity, { speed: introductionSpeed });
+      await Promise.all([this._rt.speak(entity.description), movement]);
+      if (msDelayBetweenObjects > 0) await new Promise((resolve) => setTimeout(resolve, msDelayBetweenObjects));
+    }
+
+    this._rt.me.free();
+    this._rt.it.free();
+  }
 }

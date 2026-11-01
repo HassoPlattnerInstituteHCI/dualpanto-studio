@@ -106,6 +106,7 @@ export class Emulator extends Emitter {
   }
   moveHandle(index, pos, rotDeg = null) {
     const h = this.handles[index];
+    h.force = null;
     if (rotDeg != null) h.rot = rotDeg;
     if (!pos) return;
     const to = this._clamp(pos, index);
@@ -119,7 +120,12 @@ export class Emulator extends Emitter {
     h.held = true;
   }
   applyForce(index, dir, strength = 1) {
-    this.handles[index].force = { dir, strength };
+    const h = this.handles[index];
+    h.tween = null;
+    h.target = null;
+    h.held = false;
+    // The Unity toolkit caps positive force but uses negative strength to flip it.
+    h.force = { dir: norm(dir), strength: Math.min(1, strength) };
   }
   setSpeed(index, speed) {
     this.handles[index].speed = speed;
@@ -133,6 +139,7 @@ export class Emulator extends Emitter {
   }
   freeze(index) {
     const h = this.handles[index];
+    h.force = null;
     h.held = true;
     h.tween = null;
     h.target = { ...h.pos };
@@ -172,6 +179,12 @@ export class Emulator extends Emitter {
           this.emit('transitionEnded', h.index);
         }
         h.god = { ...h.pos }; // the motors drag the god object along
+      } else if (h.force) {
+        // The mouse cannot provide real resistance. Approximate force control by
+        // driving the virtual handle in the commanded direction.
+        if (h.pointer) h.pos = { ...h.pointer };
+        h.pos = this._clamp(add(h.pos, mul(h.force.dir, 120 * h.force.strength * dt)), h.index);
+        h.god = this._moveGod(h.index, h.god, h.pos);
       } else if (h.held && h.target) {
         // position controlled by the program: the user cannot move it
         h.pos = { ...h.target };

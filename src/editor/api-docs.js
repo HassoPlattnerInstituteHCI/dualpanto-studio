@@ -8,24 +8,10 @@ type Target = Point | PantoEntity | PantoZone | PantoHandle | (() => Point);
 type Handles = 'both' | 'me' | 'it';
 
 interface FollowOptions {
-  /** Upper limit in mm/s for the approach and for jumps of the target (default 120). */
+  /** Device speed for the initial move (default 1, maximum 100). */
   speed?: number;
-  /** Rotation: a number, or true for the target's rotation. */
+  /** Rotation override in degrees, or true to follow target rotation; omitted uses Unity's target rotation + 180°. */
   rotation?: number | true;
-  /** Updates per second (default 20). Fewer = fewer packets. */
-  hz?: number;
-  /**
-   * How many update intervals one move lasts (default 2.5). Values below 1.5 make
-   * the handle restless: every move ends before the next target arrives, and the
-   * handle pulses at the update rate. Larger = calmer, more sluggish.
-   */
-  ease?: number;
-  /** Smoothing of the target 0..0.95 (default 0.25; if the target is a handle: 0.6). */
-  smooth?: number;
-  /** Lead: fraction of the move duration to aim ahead by (default 0.6). */
-  lead?: number;
-  /** Only send once the target has moved this many mm (default 1). */
-  deadzone?: number;
 }
 
 interface PantoHandle {
@@ -46,13 +32,15 @@ interface PantoHandle {
   readonly area: { x: number; y: number }[] | null;
   /** Called on every movement of the handle. */
   onMove(fn: (pos: { x: number; y: number }) => void): () => void;
-  /** Moves the handle (speed in mm/s). Me is released afterwards, It stays put (hold). */
-  moveTo(p: Target, options?: { speed?: number; duration?: number; rotation?: number; hold?: boolean }): Promise<boolean>;
+  /** Moves via switchTo, then releases by default; set shouldFreeHandle false to freeze at the target. */
+  moveTo(p: Target, options?: { speed?: number; rotation?: number; shouldFreeHandle?: boolean; hold?: boolean }): Promise<boolean>;
+  /** C# PantoHandle.MoveToPosition counterpart. */
+  moveToPosition(position: Point, newSpeed?: number, shouldFreeHandle?: boolean): Promise<boolean>;
   /**
    * Moves to the object and then stays on it: when the object moves, the handle moves
-   * along (like SwitchTo in the Unity toolkit). The promise resolves on first arrival.
+   * along (like SwitchTo in the Unity toolkit). The promise resolves on transition end or timeout.
    * Ends with free(), freeze(), stopFollow() or the next switchTo.
-   * hz = updates per second (default 20), speed = upper limit in mm/s.
+   * speed controls the initial move (default 1, maximum 100).
    */
   switchTo(target: Target, options?: FollowOptions): Promise<boolean>;
   /** Same as switchTo. */
@@ -117,7 +105,7 @@ interface PantoEntity {
   /** Stops movement and following. */
   halt(): this;
   /** Shorthand for it.switchTo(entity): the handle moves there and stays on the object. */
-  attachTo(handle?: 'it' | 'me', options?: { speed?: number; hz?: number }): this;
+  attachTo(handle?: 'it' | 'me', options?: FollowOptions): this;
   detach(): this;
   /** Turns the round wall on the device on or off. */
   setSolid(on?: boolean): this;
@@ -153,6 +141,15 @@ interface EntityOptions {
   handle?: 'me' | 'it' | 'both';
   enabled?: boolean;
   persistent?: boolean;
+  /** Unity ObjectOfInterest: spoken when level.playIntroduction() runs. */
+  description?: string;
+  /** Higher priority entities are introduced first. */
+  priority?: number;
+  /** Use Me (upper) when true; It (lower) otherwise. */
+  isOnUpper?: boolean;
+  /** Trace the ordered outline points instead of moving to the center. */
+  traceShape?: boolean;
+  outline?: Point[];
 }
 
 interface PantoLevel {
@@ -168,6 +165,8 @@ interface PantoLevel {
   entities(kind?: EntityKind): PantoEntity[];
   enemies(): PantoEntity[];
   items(): PantoEntity[];
+  /** Introduce described entities by priority, then free both handles. */
+  playIntroduction(options?: { introductionSpeed?: number; msDelayBetweenObjects?: number }): Promise<void>;
 }
 
 interface ObjectOptions { name?: string; handles?: Handles; enabled?: boolean; /** survives level changes */ persistent?: boolean }
@@ -183,6 +182,8 @@ declare const panto: {
   readonly width: number;
   readonly height: number;
   readonly device: 'emulator' | 'serial';
+  /** DualPantoSync.SetSpeedControl / Unity Settings counterpart. */
+  setSpeedControl(options?: { tetheringEnabled?: boolean; tetherFactor?: number; innerRadius?: number; outerRadius?: number; speedControlOption?: 'MAX_SPEED' | 'EXPLORATION' | 'LEASH' | 0 | 1 | 2; pockEnabled?: boolean }): void;
   /** Reachable area of a handle. Me and It have different areas. */
   area(handle?: 'me' | 'it'): { points: { x: number; y: number }[] | null; contains(p: Point | PantoHandle): boolean };
   /** Can the handle (or both) reach the point? */
@@ -369,7 +370,7 @@ panto.area("it").points            // outline as a list of points`)}
   <h3>Handles</h3>
   ${code(`me.position            // {x, y} – what the person feels
 me.onMove(pos => log(pos))
-await it.moveTo({x: 180, y: 100}, { speed: 120 })  // mm/s
+await it.moveTo({x: 180, y: 100})           // releases after the move
 await me.moveTo(zone.center)   // Me is released again afterwards
 it.free(); it.freeze()
 me.distanceTo(it)`)}
@@ -377,11 +378,11 @@ me.distanceTo(it)`)}
 </section>
 <section>
   <h3>Attaching a handle to an object</h3>
-  <p><code>switchTo</code> moves the handle to the object and then keeps it <b>attached</b>: when the object moves, the handle moves along. This is the counterpart to <code>PantoHandle.SwitchTo</code> in the Unity toolkit and the way to make an enemy tangible – the person feels it through the It handle.</p>
+  <p><code>switchTo</code> moves the handle to the object and then keeps it <b>attached</b>: when the object moves, the handle moves along by updating its position target. If no transition callback arrives, tracking starts after 3 seconds.</p>
   ${code(`const enemy = level.entity("Guard");
 enemy.patrol([[150, 80], [210, 140]], { speed: 60 });
 
-await it.switchTo(enemy);               // moves there, resolves on arrival
+await it.switchTo(enemy);               // resolves when transition ends or times out
 it.isFollowing   it.followName          // true, "Guard"
 it.stopFollow();                        // stays where it is
 it.free();                              // let go (also stops following)
@@ -389,18 +390,8 @@ it.free();                              // let go (also stops following)
 it.switchTo(level.zone("Goal"));                       // centre of the zone
 it.switchTo(() => ({ x: 200, y: 110 + panto.time }));  // your own curve
 me.switchTo(enemy);                                    // guides the person's hand`)}
-  <p>On the device this is about 17 packets per second while the target moves – the Unity toolkit sends 50. If the object stands still, nothing is sent. If the target leaves the handle's reachable area, the handle stays at the nearest reachable point and the console says so once.</p>
-  <h4>If the handle moves unevenly</h4>
-  <p>The firmware moves the god object to the target in <code>1 / SPEED</code> seconds. If a move lasts only one update interval, it is over before the next target arrives – the handle moves in small bursts and pulses at the update rate. So by default every move lasts <b>2.5 intervals</b> (<code>ease</code>) and the moves overlap; a <b>lead</b> (<code>lead</code>) compensates the lag, and a noisy target is <b>smoothed</b> (<code>smooth</code>).</p>
-  ${code(`it.switchTo(enemy, {
-  speed: 150,     // upper limit mm/s – for the approach and for jumps
-  hz: 20,         // updates per second
-  ease: 2.5,      // move duration in intervals: larger = calmer, more sluggish
-  smooth: 0.25,   // smoothing of the target (with a handle as target: 0.6)
-  lead: 0.6,      // lead against the lag
-  deadzone: 1,    // only send once the target has moved 1 mm
-});`)}
-  <p>Still twitching: raise <code>ease</code> to 3–4 and lower <code>hz</code> to 12–15. Handle lagging too far behind: lower <code>ease</code> (not below 1.5) or set <code>lead</code> to 1. Target jittering (the person's hand, sensor values): set <code>smooth</code> to 0.6–0.8.</p>
+  <p><code>speed</code> controls movement (default 1, maximum 100). The device ignores positions outside its rectangular working bounds.</p>
+  ${code(`it.switchTo(enemy, { speed: 1 });`)}
   <p><code>entity.attachTo("it")</code> is shorthand for <code>it.switchTo(entity)</code>.</p>
 </section>
 <section>

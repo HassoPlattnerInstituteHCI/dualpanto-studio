@@ -274,7 +274,7 @@ export class Entity extends WorldObject {
   attachTo(handle = 'it', opts = {}) {
     const h = this._rt.handles[handle === 'me' ? 0 : 1];
     this._attached = h ?? null;
-    h?.switchTo(this, { speed: 150, ...opts });
+    h?.switchTo(this, { speed: 1, ...opts });
     return this;
   }
 

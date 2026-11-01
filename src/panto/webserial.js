@@ -398,14 +398,18 @@ export class SerialDevice extends Emitter {
   }
   /** pos: world point or null (keep), rotDeg: degrees or null (keep). */
   moveHandle(index, pos, rotDeg = null) {
-    const d = pos ? this.toDevice(pos) : { x: NaN, y: NaN };
+    // DualPantoSync.UpdateHandlePosition sends NaN for an out-of-bounds
+    // position so the firmware retains its current position on that axis.
+    const inBounds = pos && pos.x >= 0 && pos.x <= this.profile.width && pos.y >= 0 && pos.y <= this.profile.height;
+    const d = inBounds ? this.toDevice(pos) : { x: NaN, y: NaN };
     const rot = rotDeg == null ? NaN : (-rotDeg * Math.PI) / 180;
     this._send(build.motor(CONTROL.POSITION, index, d.x, d.y, rot));
   }
   /** Force rendering. dir: world vector, strength 0..1 */
   applyForce(index, dir, strength = 1) {
     const l = Math.hypot(dir.x, dir.y) || 1;
-    const s = Math.min(1, Math.max(0, strength));
+    // Unity clamps only the upper bound; negative strength reverses direction.
+    const s = Math.min(1, strength);
     this._send(build.motor(CONTROL.FORCE, index, (dir.x / l) * s, (-dir.y / l) * s, 0));
   }
   setSpeed(index, speed) {
