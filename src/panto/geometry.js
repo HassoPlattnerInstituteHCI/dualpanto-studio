@@ -13,6 +13,14 @@ export const norm = (a) => {
   const l = len(a);
   return l > 1e-9 ? { x: a.x / l, y: a.y / l } : { x: 0, y: 0 };
 };
+
+/** Closest point on segment ab to p, plus the parameter t in [0,1]. */
+export function closestOnSegment(p, a, b) {
+  const ab = sub(b, a);
+  const l2 = dot(ab, ab);
+  const t = l2 > 0 ? Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2)) : 0;
+  return { point: add(a, mul(ab, t)), t };
+}
 export const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
 /** Accepts {x,y}, [x,y] and returns {x,y}. */
@@ -22,15 +30,7 @@ export function toPoint(p) {
   throw new TypeError('Expected a point: {x, y} or [x, y]');
 }
 
-/** Closest point on segment ab to p, plus the parameter t in [0,1]. */
-export function closestOnSegment(p, a, b) {
-  const ab = sub(b, a);
-  const l2 = dot(ab, ab);
-  let t = l2 > 0 ? dot(sub(p, a), ab) / l2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return { point: add(a, mul(ab, t)), t };
-}
-
+/** Distance from p to segment ab. */
 export function distToSegment(p, a, b) {
   return dist(p, closestOnSegment(p, a, b).point);
 }

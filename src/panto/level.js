@@ -46,6 +46,13 @@ export class Level {
     return e ?? this._rt._dummyEntity();
   }
 
+  /** Finds a physics-driven Ball object by name. */
+  ball(name) {
+    const ball = this._scene('entity').find((o) => o.kind === 'ball' && o.name === name);
+    if (!ball) this._rt.log('warn', `There is no Ball "${name}" in level "${this.name}".`);
+    return ball ?? this._rt._dummyEntity();
+  }
+
   /** Finds any object (wall, rail, zone, entity) by its name. */
   object(name) {
     return this._scene().find((o) => o.name === name) ?? null;

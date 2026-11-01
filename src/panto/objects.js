@@ -117,6 +117,72 @@ export class Entity extends WorldObject {
     this._attached = null; // handle attached to this object (attachTo)
     this._body = null; // Obstacle, only when solid
     this._bodyAt = null;
+    this._ballVelocity = null;
+    this._ballMoving = false;
+    if (this.kind === 'ball' && this.moving) {
+      const angle = +this.angle || 0;
+      const speed = Math.max(0, +this.speed || 0);
+      this._ballVelocity = { x: Math.sin(angle) * speed, y: Math.cos(angle) * speed };
+      this._ballMoving = speed > 0;
+    }
+  }
+
+  /** Start or re-serve this Ball. Angle is measured from downward, in radians. */
+  launch({ angle = this.angle ?? 0, speed = this.speed ?? 20 } = {}) {
+    if (this.kind !== 'ball') throw new Error('launch() is only available on Ball objects.');
+    const a = Number(angle) || 0;
+    const v = Math.max(0, Number(speed) || 0);
+    this._ballVelocity = { x: Math.sin(a) * v, y: Math.cos(a) * v };
+    this._ballMoving = v > 0;
+    return this;
+  }
+
+  /** Stop a moving Ball while keeping its position. */
+  stopBall() {
+    this._ballMoving = false;
+    this._ballVelocity = { x: 0, y: 0 };
+    return this;
+  }
+
+  get velocity() {
+    return this.kind === 'ball' ? { ...(this._ballVelocity ?? { x: 0, y: 0 }) } : undefined;
+  }
+
+  _stepBall(dt) {
+    if (this.kind !== 'ball' || !this._ballMoving || !this._ballVelocity || this.enabled === false) return false;
+    this.x += this._ballVelocity.x * dt;
+    this.y += this._ballVelocity.y * dt;
+    const hit = this._rt._resolveBallCollisions(this);
+    if (hit) {
+      const speed = Math.hypot(this._ballVelocity.x, this._ballVelocity.y) * Math.max(0, +this.bounceSpeedup || 1);
+      const current = Math.hypot(this._ballVelocity.x, this._ballVelocity.y) || 1;
+      this._ballVelocity.x = (this._ballVelocity.x / current) * speed;
+      this._ballVelocity.y = (this._ballVelocity.y / current) * speed;
+      if (typeof this.onBounce === 'function') this.onBounce(hit);
+    }
+    this._syncBody();
+    return true;
+  }
+
+  _reflectBall(normal) {
+    const n = norm(normal);
+    const dot = this._ballVelocity.x * n.x + this._ballVelocity.y * n.y;
+    if (dot >= 0) return false;
+    this._ballVelocity.x -= 2 * dot * n.x;
+    this._ballVelocity.y -= 2 * dot * n.y;
+    return true;
+  }
+
+  _bounceOffPaddle(centerX, centerY, width, depth) {
+    const incomingY = this._ballVelocity.y;
+    const direction = incomingY >= 0 ? -1 : 1;
+    const offset = Math.max(-1, Math.min(1, (this.x - centerX) / Math.max(1, width)));
+    const angle = offset * Math.max(0, +this.bounceAngle || 0);
+    const speed = Math.hypot(this._ballVelocity.x, this._ballVelocity.y);
+    this._ballVelocity.x = Math.sin(angle) * speed;
+    this._ballVelocity.y = Math.cos(angle) * speed * direction;
+    this.y = centerY + direction * (depth + this.r + 0.05);
+    return true;
   }
 
   // ---- position ---------------------------------------------------------
@@ -157,7 +223,7 @@ export class Entity extends WorldObject {
   }
 
   get isMoving() {
-    return !!(this._move || this._follow);
+    return !!(this._move || this._follow || this._ballMoving);
   }
 
   // ---- movement ---------------------------------------------------------

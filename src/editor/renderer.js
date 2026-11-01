@@ -19,6 +19,7 @@ export function palette() {
     zone: cssVar('--c-zone', '#3a6fd8'),
     enemy: cssVar('--c-enemy', '#d23f3f'),
     item: cssVar('--c-item', '#2f9e44'),
+    ball: cssVar('--c-ball', '#2463eb'),
     me: cssVar('--c-me', '#e8710a'),
     it: cssVar('--c-it', '#7b4fd0'),
     text: cssVar('--fg', '#1d1d1f'),
@@ -205,7 +206,7 @@ export function drawWorld(ctx, view, scene, opts = {}) {
 /** Enemies, items and markers: shown, optionally felt (solid). */
 function drawEntity(ctx, o, c, px, opts) {
   const selected = opts.selectedId != null && opts.selectedId === o.id;
-  const color = o.kind === 'enemy' ? c.enemy : o.kind === 'item' ? c.item : c.muted;
+  const color = o.kind === 'enemy' ? c.enemy : o.kind === 'item' ? c.item : o.kind === 'ball' ? c.ball : c.muted;
   const gone = o.collected || o.enabled === false;
   const r = Math.max(2, o.r ?? 10);
   ctx.globalAlpha = gone ? 0.22 : 1;
@@ -214,9 +215,9 @@ function drawEntity(ctx, o, c, px, opts) {
   ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
   ctx.fillStyle = hexA(color, 0.13);
   ctx.fill();
-  ctx.setLineDash(o.solid ? [] : [px(3), px(3)]);
-  ctx.strokeStyle = hexA(color, o.solid ? 0.9 : 0.5);
-  ctx.lineWidth = px(o.solid ? 2 : 1);
+  ctx.setLineDash(o.solid || o.kind === 'ball' ? [] : [px(3), px(3)]);
+  ctx.strokeStyle = hexA(color, o.solid || o.kind === 'ball' ? 0.9 : 0.5);
+  ctx.lineWidth = px(o.solid || o.kind === 'ball' ? 2 : 1);
   ctx.stroke();
   ctx.setLineDash([]);
   // body: triangle = enemy, diamond = item, dot = marker
@@ -233,6 +234,8 @@ function drawEntity(ctx, o, c, px, opts) {
     ctx.lineTo(o.x, o.y + b);
     ctx.lineTo(o.x - b, o.y);
     ctx.closePath();
+  } else if (o.kind === 'ball') {
+    ctx.arc(o.x, o.y, b, 0, Math.PI * 2);
   } else {
     ctx.arc(o.x, o.y, b * 0.75, 0, Math.PI * 2);
   }

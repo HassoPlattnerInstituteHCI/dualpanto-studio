@@ -11,6 +11,8 @@ import {
   shapeContains,
   shapeCenter,
   pointInPolygon,
+  closestOnSegment,
+  edges,
   clampToPolygon,
   distToPolygonEdge,
   polygonCentroid,
@@ -186,11 +188,92 @@ export class Runtime extends Emitter {
     for (const o of [...this.objects.values()]) {
       if (o.type === 'entity' && o._step(dt)) moved = true;
     }
+    for (const o of [...this.objects.values()]) {
+      if (o.type === 'entity' && o._stepBall(dt)) moved = true;
+    }
     // handles attached to an object keep getting the new target position
     for (const h of this.handles) h._tickFollow(now);
     this._checkTouch();
     for (const fn of [...this._frameHandlers]) fn(dt, this._time);
     if (moved) this.emit('frame');
+  }
+
+  _resolveBallCollisions(ball) {
+    const matches = (target) => {
+      const value = target?.bounceBall;
+      return value === '*' || value === ball.name || (Array.isArray(value) && value.includes(ball.name));
+    };
+    const radius = Math.max(0, +ball.r || 0);
+
+    for (const target of this.objects.values()) {
+      if (target === ball || target.removed || target.enabled === false || !matches(target)) continue;
+      if (target.type === 'wall' || target.type === 'rail') {
+        for (const [a, b] of edges(target.points ?? [], target.closed)) {
+          const nearest = closestOnSegment(ball, a, b).point;
+          const dx = ball.x - nearest.x, dy = ball.y - nearest.y;
+          const d = Math.hypot(dx, dy);
+          if (d > radius || radius <= 0) continue;
+          const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+          const normal = d > 1e-8 ? { x: dx / d, y: dy / d } : { x: (b.y - a.y) / length, y: -(b.x - a.x) / length };
+          if (!ball._reflectBall(normal)) continue;
+          ball.x = nearest.x + normal.x * (radius + 0.05);
+          ball.y = nearest.y + normal.y * (radius + 0.05);
+          return target;
+        }
+      } else if (target.type === 'zone' && target.shape === 'circle') {
+        const dx = ball.x - target.x, dy = ball.y - target.y;
+        const d = Math.hypot(dx, dy), min = radius + Math.max(0, +target.r || 0);
+        if (d > min || d <= 1e-8 || !ball._reflectBall({ x: dx / d, y: dy / d })) continue;
+        ball.x = target.x + (dx / d) * (min + 0.05);
+        ball.y = target.y + (dy / d) * (min + 0.05);
+        return target;
+      } else if (target.type === 'zone') {
+        const points = target.shape === 'rect'
+          ? rectPoints(target.x, target.y, target.w, target.h)
+          : target.points ?? [];
+        for (const [a, b] of edges(points, true)) {
+          const nearest = closestOnSegment(ball, a, b).point;
+          const dx = ball.x - nearest.x, dy = ball.y - nearest.y;
+          const d = Math.hypot(dx, dy);
+          if (d > radius || radius <= 0) continue;
+          const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+          const normal = d > 1e-8 ? { x: dx / d, y: dy / d } : { x: (b.y - a.y) / length, y: -(b.x - a.x) / length };
+          if (!ball._reflectBall(normal)) continue;
+          ball.x = nearest.x + normal.x * (radius + 0.05);
+          ball.y = nearest.y + normal.y * (radius + 0.05);
+          return target;
+        }
+      } else if (target.type === 'entity') {
+        const width = +target.bounceWidth;
+        if (width > 0) {
+          const depth = Math.max(0, +(target.bounceDepth ?? target.r) || 0);
+          if (Math.abs(ball.x - target.x) <= width + radius && Math.abs(ball.y - target.y) <= depth + radius) {
+            if ((ball.y < target.y && ball._ballVelocity.y > 0) || (ball.y > target.y && ball._ballVelocity.y < 0))
+              return ball._bounceOffPaddle(target.x, target.y, width, depth) ? target : null;
+          }
+        } else {
+          const dx = ball.x - target.x, dy = ball.y - target.y;
+          const d = Math.hypot(dx, dy), min = radius + Math.max(0, +target.r || 0);
+          if (d > min || d <= 1e-8 || !ball._reflectBall({ x: dx / d, y: dy / d })) continue;
+          ball.x = target.x + (dx / d) * (min + 0.05);
+          ball.y = target.y + (dy / d) * (min + 0.05);
+          return target;
+        }
+      }
+    }
+
+    const handles = Array.isArray(ball.bounceHandles) ? ball.bounceHandles : [];
+    const width = Math.max(0, +ball.handleBounceWidth || 0);
+    const depth = Math.max(0, +ball.handleBounceDepth || 0);
+    for (let i = 0; i < this.handles.length; i++) {
+      const handle = this.handles[i];
+      if (!handles.includes(handle.name) || !handle._hasPosition) continue;
+      const p = handle._god;
+      if (Math.abs(ball.x - p.x) > width + radius || Math.abs(ball.y - p.y) > depth + radius) continue;
+      if ((ball.y < p.y && ball._ballVelocity.y > 0) || (ball.y > p.y && ball._ballVelocity.y < 0))
+        return ball._bounceOffPaddle(p.x, p.y, width, depth) ? handle : null;
+    }
+    return null;
   }
 
   /** Entities react when a handle comes inside their radius. */
@@ -469,6 +552,7 @@ export class Runtime extends Emitter {
       persistent = false,
       boundary = false,
       body = false,
+      bounceBall = '',
     } = {}
   ) {
     this._assertRunning();
@@ -485,6 +569,7 @@ export class Runtime extends Emitter {
       closed,
       passable,
       handles,
+      bounceBall,
       enabled: false,
       deviceIds: [devId],
       boundary,
@@ -498,7 +583,7 @@ export class Runtime extends Emitter {
 
   createRail(
     points,
-    { strength = 5, handles = 'both', name = '', enabled = true, persistent = false } = {}
+    { strength = 5, handles = 'both', name = '', enabled = true, persistent = false, bounceBall = '' } = {}
   ) {
     this._assertRunning();
     const pts = points.map(toPoint);
@@ -517,6 +602,7 @@ export class Runtime extends Emitter {
       points: pts,
       strength,
       handles,
+      bounceBall,
       enabled: false,
       deviceIds: ids,
       _upload: upload,
@@ -528,7 +614,7 @@ export class Runtime extends Emitter {
 
   createZone(
     shape,
-    { name = '', speak = '', handle = 'me', enabled = true, persistent = false, label } = {}
+    { name = '', speak = '', handle = 'me', enabled = true, persistent = false, label, bounceBall = '' } = {}
   ) {
     this._assertRunning();
     let s;
@@ -554,6 +640,7 @@ export class Runtime extends Emitter {
       handle,
       enabled,
       label,
+      bounceBall,
       ...s,
     });
     // a handle that already stands in a new zone does not "enter" it
@@ -582,6 +669,13 @@ export class Runtime extends Emitter {
       handles = 'me',
       enabled = true,
       persistent = false,
+      speed = 20,
+      angle = 0,
+      bounceSpeedup = 1.02,
+      bounceAngle = 1,
+      bounceHandles = ['me', 'it'],
+      handleBounceWidth = 16,
+      handleBounceDepth = 5,
       ...rest
     } = opts;
     const p = this._clampWorld({ x: +x, y: +y });
@@ -603,6 +697,13 @@ export class Runtime extends Emitter {
       handles,
       enabled,
       collected: false,
+      speed,
+      angle,
+      bounceSpeedup,
+      bounceAngle,
+      bounceHandles,
+      handleBounceWidth,
+      handleBounceDepth,
     });
     this._register(obj, persistent);
     if (solid) obj._syncBody(true);
@@ -664,15 +765,17 @@ export class Runtime extends Emitter {
           closed: !!o.closed,
           passable: !!o.passable,
           handles: o.handles ?? 'both',
+          bounceBall: o.bounceBall ?? '',
         });
       case 'rail':
         return this.createRail(o.points, {
           ...common,
           strength: o.strength ?? 5,
           handles: o.handles ?? 'both',
+          bounceBall: o.bounceBall ?? '',
         });
       case 'zone':
-        return this.createZone(o, { ...common, speak: o.speak ?? '', handle: o.handle ?? 'me' });
+        return this.createZone(o, { ...common, speak: o.speak ?? '', handle: o.handle ?? 'me', bounceBall: o.bounceBall ?? '' });
       default:
         return null;
     }
@@ -1044,6 +1147,8 @@ export class Runtime extends Emitter {
       entity: (a, b, c) => rt.createEntity(entityArgs(a, b, c)),
       enemy: (a, b, c) => rt.createEntity({ kind: 'enemy', r: 12, ...entityArgs(a, b, c) }),
       item: (a, b, c) => rt.createEntity({ kind: 'item', r: 10, ...entityArgs(a, b, c) }),
+      /** A physics driven ball. Configure it in the level editor or call ball.launch(). */
+      ball: (a, b, c) => rt.createEntity({ kind: 'ball', r: 4, ...entityArgs(a, b, c) }),
       /** All entities of the scene, optionally filtered by kind. */
       entities: (kind) => rt.entities(kind),
       /** Object of the scene by name – also works in the main script, without `level`. */

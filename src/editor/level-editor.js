@@ -14,6 +14,7 @@ export const TOOLS = [
   { key: 'zoneCircle', label: 'Round zone', hint: 'Drag out from the centre.', shortcut: 'C' },
   { key: 'enemy', label: 'Enemy', hint: 'Click to place an enemy. It is shown and reacts when Me touches it. In the script: level.entity("Name").', shortcut: 'E' },
   { key: 'item', label: 'Item', hint: 'Click to place an item to collect. It disappears when touched.', shortcut: 'I' },
+  { key: 'ball', label: 'Ball', hint: 'Place a physics driven ball. Set its speed and choose which walls, objects, and handles it bounces off.', shortcut: '' },
   { key: 'spawnMe', label: 'Start Me', hint: 'Click: the Me handle moves here when the level loads.', shortcut: '' },
   { key: 'spawnIt', label: 'Start It', hint: 'Click: the It handle moves here when the level loads.', shortcut: '' },
 ];
@@ -423,14 +424,15 @@ export class LevelEditor {
       this.drag = { kind: 'create', tool: t, start: p, end: p };
       return;
     }
-    if (t === 'enemy' || t === 'item') {
+    if (t === 'enemy' || t === 'item' || t === 'ball') {
       this.snapshot();
       const obj = {
         id: uid('o'), type: 'entity', kind: t, shape: 'circle',
-        name: this._name(t === 'enemy' ? 'Enemy' : 'Item'),
-        x: p.x, y: p.y, r: t === 'enemy' ? 12 : 10,
+        name: this._name(t === 'enemy' ? 'Enemy' : t === 'item' ? 'Item' : 'Ball'),
+        x: p.x, y: p.y, r: t === 'enemy' ? 12 : t === 'item' ? 10 : 4,
         speak: '', sound: '', solid: false, handle: 'me',
       };
+      if (t === 'ball') Object.assign(obj, { speed: 20, angle: 0, bounceSpeedup: 1.02, bounceAngle: 1, bounceHandles: ['me'], handleBounceWidth: 16, handleBounceDepth: 5 });
       this.level.objects.push(obj);
       this.select(obj.id);
       this.changed();

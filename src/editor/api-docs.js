@@ -77,7 +77,7 @@ interface PantoZone {
   enable(): this; disable(): this; remove(): void;
 }
 
-type EntityKind = 'enemy' | 'item' | 'marker';
+type EntityKind = 'enemy' | 'item' | 'marker' | 'ball';
 
 interface PantoEntity {
   readonly name: string;
@@ -111,6 +111,12 @@ interface PantoEntity {
   setSolid(on?: boolean): this;
   distanceTo(p: Point | PantoEntity | PantoHandle): number;
   touching(handle?: 'me' | 'it'): boolean;
+  /** Ball only: launch with angle from downward and speed in mm/s. */
+  launch(options?: { angle?: number; speed?: number }): this;
+  /** Ball only: stop its physics movement. */
+  stopBall(): this;
+  /** Ball velocity in mm/s, or undefined for other entities. */
+  readonly velocity?: Point;
   /** Called when a handle touches the object. */
   onTouch(fn: (handle: PantoHandle, entity: PantoEntity) => void): () => void;
   onLeave(fn: (handle: PantoHandle, entity: PantoEntity) => void): () => void;
@@ -139,6 +145,26 @@ interface EntityOptions {
   vanish?: boolean;
   /** Which handle triggers it (default "me"). */
   handle?: 'me' | 'it' | 'both';
+  /** Ball movement speed in mm/s. */
+  speed?: number;
+  /** Ball launch angle in radians, measured from downward. */
+  angle?: number;
+  /** Ball speed multiplier after each collision. */
+  bounceSpeedup?: number;
+  /** Maximum paddle deflection angle in radians. */
+  bounceAngle?: number;
+  /** Width/depth used for paddle shaped handle collisions. */
+  handleBounceWidth?: number;
+  handleBounceDepth?: number;
+  /** Serve spread in radians (available to game scripts). */
+  serveAngle?: number;
+  /** Select which handles this ball bounces off. */
+  bounceHandles?: Array<'me' | 'it'>;
+  /** Set on a wall or entity to make it bounce the named Ball. */
+  bounceBall?: string;
+  /** Optional paddle shaped collision dimensions on an entity. */
+  bounceWidth?: number;
+  bounceDepth?: number;
   enabled?: boolean;
   persistent?: boolean;
   /** Unity ObjectOfInterest: spoken when level.playIntroduction() runs. */
@@ -159,6 +185,8 @@ interface PantoLevel {
   zone(name: string): PantoZone;
   /** Enemy, item or marker by its name from the level editor. */
   entity(name: string): PantoEntity;
+  /** Physics-driven Ball by its name from the level editor. */
+  ball(name: string): PantoEntity;
   /** Any object of this level by its name. */
   object(name: string): PantoObstacle | PantoZone | PantoEntity | null;
   zones(): PantoZone[];
@@ -169,7 +197,7 @@ interface PantoLevel {
   playIntroduction(options?: { introductionSpeed?: number; msDelayBetweenObjects?: number }): Promise<void>;
 }
 
-interface ObjectOptions { name?: string; handles?: Handles; enabled?: boolean; /** survives level changes */ persistent?: boolean }
+interface ObjectOptions { name?: string; handles?: Handles; enabled?: boolean; /** Ball name this object bounces */ bounceBall?: string; /** survives level changes */ persistent?: boolean }
 
 declare const panto: {
   readonly me: PantoHandle;
@@ -198,7 +226,7 @@ declare const panto: {
   rail(points: Point[], options?: ObjectOptions & { strength?: number }): PantoObstacle;
   /** Invisible area that reacts when a handle enters it. */
   zone(shape: { x: number; y: number; w: number; h: number } | { x: number; y: number; r: number } | Point[],
-       options?: { name?: string; speak?: string; handle?: 'me' | 'it' | 'both'; persistent?: boolean }): PantoZone;
+       options?: { name?: string; speak?: string; handle?: 'me' | 'it' | 'both'; bounceBall?: string; persistent?: boolean }): PantoZone;
   /** Visible object: panto.entity(x, y, { … }) or panto.entity({ x, y, … }). */
   entity(x: number, y: number, options?: EntityOptions): PantoEntity;
   entity(options: EntityOptions): PantoEntity;
@@ -208,6 +236,9 @@ declare const panto: {
   /** Item to collect (green diamond). */
   item(x: number, y: number, options?: EntityOptions): PantoEntity;
   item(options: EntityOptions): PantoEntity;
+  /** Physics-driven ball, configurable in the level editor or with launch(). */
+  ball(x: number, y: number, options?: EntityOptions): PantoEntity;
+  ball(options: EntityOptions): PantoEntity;
   /** All entities of the scene, optionally by kind. */
   entities(kind?: EntityKind): PantoEntity[];
   /** Object of the scene by its name – also works in the main script, where there is no "level". */
@@ -462,6 +493,17 @@ coin.position   coin.radius = 16   coin.distanceTo(me)   coin.touching()`)}
 level.entity("Guard").attachTo("it");   // It moves along
 level.entity("Guard").detach();`)}
   <p>Without a single line of code: an item disappears and beeps when touched, an enemy buzzes. A text under "Say on touch" is spoken, a selected sound is played.</p>
+</section>
+<section>
+  <h3>Ball physics</h3>
+  <p><b>Ball</b> is a placeable game object. The runtime moves it each frame and resolves collisions against walls, rails, selected entities, zones, and selected handles. Pick a Ball in an object's <b>Bounced off by ball</b> setting to enable that collision. Ball properties include speed, launch angle, bounce speed increase, and handle bounce settings.</p>
+  ${code(`const ball = level.ball("Ball");
+ball.launch({ angle: 0.25, speed: 24 });
+ball.stopBall();
+ball.velocity; // { x, y } in mm/s
+
+// On a wall or enemy, choose which Ball collides with it in the level editor.
+const puck = panto.ball(180, 105, { name: "Puck", speed: 20 });`)}
 </section>
 <section>
   <h3>Levels in code</h3>

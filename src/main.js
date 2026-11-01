@@ -840,7 +840,7 @@ function renderProps(obj) {
   }
 
   const typeLabel = obj.type === 'entity'
-    ? { enemy: 'Enemy', item: 'Item' }[obj.kind] ?? 'Object'
+    ? { enemy: 'Enemy', item: 'Item', ball: 'Ball' }[obj.kind] ?? 'Object'
     : { wall: 'Wall', rail: 'Rail', zone: 'Zone' }[obj.type];
   const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'wall' || obj.type === 'rail' ? 'optional, e.g. Door' : 'e.g. Goal' });
   let before = obj.name;
@@ -851,6 +851,12 @@ function renderProps(obj) {
   });
   nameIn.addEventListener('change', () => {
     renameInScript(before, nameIn.value);
+    if (obj.type === 'entity' && obj.kind === 'ball' && before !== nameIn.value) {
+      for (const target of currentLevel()?.objects ?? []) {
+        if (target.bounceBall === before) target.bounceBall = nameIn.value;
+      }
+      ed.changed();
+    }
     before = nameIn.value;
   });
   panel.append(h('h3', {}, typeLabel), field('Name', nameIn, 'The script finds the object by this name.'));
@@ -860,9 +866,10 @@ function renderProps(obj) {
     c.addEventListener('change', () => ed.update(obj, { [key]: c.checked }));
     return h('label', { class: 'check', title: hint ?? '' }, c, label);
   };
-  const range = (label, key, { min, max, step = 1, unit = ' mm', hint } = {}) => {
-    const r = h('input', { type: 'range', min, max, step, value: obj[key] });
-    const out = h('output', {}, `${obj[key]}${unit}`);
+  const range = (label, key, { min, max, step = 1, unit = ' mm', hint, initial } = {}) => {
+    const value = obj[key] ?? initial ?? min;
+    const r = h('input', { type: 'range', min, max, step, value });
+    const out = h('output', {}, `${value}${unit}`);
     r.addEventListener('pointerdown', () => ed.snapshot());
     r.addEventListener('input', () => {
       out.textContent = `${r.value}${unit}`;
@@ -875,13 +882,24 @@ function renderProps(obj) {
     s.addEventListener('change', () => ed.update(obj, { [key]: s.value }));
     return field(label, s);
   };
+  const ballBounce = () => {
+    const balls = app.levelEditor?.level?.objects?.filter((o) => o.type === 'entity' && o.kind === 'ball' && o.id !== obj.id) ?? [];
+    const s = h('select', {}, [['', 'Never'], ...balls.map((b) => [b.name, b.name])]
+      .map(([value, label]) => h('option', { value, selected: (obj.bounceBall ?? '') === value }, label)));
+    s.addEventListener('change', () => {
+      ed.update(obj, { bounceBall: s.value });
+      renderProps(obj);
+    });
+    return field('Bounced off by ball', s);
+  };
 
   if (obj.type === 'wall') {
     panel.append(
       check('Closed shape', 'closed'),
       check('Passable (can be pushed through)', 'passable'),
       check('Active on start', 'enabled', null, true),
-      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both')
+      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
+      ballBounce()
     );
   } else if (obj.type === 'rail') {
     const r = h('input', { type: 'range', min: 2, max: 20, step: 1, value: obj.strength ?? 6 });
@@ -894,13 +912,24 @@ function renderProps(obj) {
     panel.append(
       field('Strength (capture width)', h('div', { class: 'range-row' }, r, out), 'How far you have to move away from the rail to leave it.'),
       check('Active on start', 'enabled', null, true),
-      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both')
+      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
+      ballBounce()
     );
   } else if (obj.type === 'entity') {
-    const kindSel = h('select', {}, [['enemy', 'Enemy'], ['item', 'Item'], ['marker', 'Marker']]
+    const kindSel = h('select', {}, [['enemy', 'Enemy'], ['item', 'Item'], ['marker', 'Marker'], ['ball', 'Ball']]
       .map(([v, l]) => h('option', { value: v, selected: (obj.kind ?? 'marker') === v }, l)));
     kindSel.addEventListener('change', () => {
-      ed.update(obj, { kind: kindSel.value });
+      const patch = { kind: kindSel.value };
+      if (kindSel.value === 'ball') {
+        Object.assign(patch, {
+          speed: obj.speed ?? 20, angle: obj.angle ?? 0, serveAngle: obj.serveAngle ?? 0.6,
+          bounceSpeedup: obj.bounceSpeedup ?? 1.02, bounceAngle: obj.bounceAngle ?? 1,
+          bounceHandles: obj.bounceHandles ?? ['me', 'it'],
+          handleBounceWidth: obj.handleBounceWidth ?? 16, handleBounceDepth: obj.handleBounceDepth ?? 5,
+          moving: obj.moving ?? false,
+        });
+      }
+      ed.update(obj, patch);
       renderProps(obj); // other kind, other options
     });
     const say = h('textarea', { rows: 2, placeholder: obj.kind === 'item' ? 'e.g. "Coin!"' : 'e.g. "Ouch!"' });
@@ -914,13 +943,33 @@ function renderProps(obj) {
     ]);
     sndSel.addEventListener('change', () => ed.update(obj, { sound: sndSel.value }));
     panel.append(
-      field('Kind', kindSel, 'Enemies and items are shown; the script gives them their behaviour.'),
-      range('Radius (touch)', 'r', { min: 4, max: 40, hint: 'How close the handle has to get for onTouch to fire.' }),
-      field('Say on touch', say),
-      field('Play on touch', sndSel, sounds.length ? null : 'Add sounds in the Sounds tab.'),
-      check('Tangible: round wall on the device', 'solid', 'Unchecked, the object is only visible and reacts to touch. Checked, the runtime creates a round wall; moving objects are only re-sent when they stop.'),
+      field('Kind', kindSel, 'Enemies and items react to handle touch. Ball is moved by the runtime physics engine.'),
+      range(obj.kind === 'ball' ? 'Radius' : 'Radius (touch)', 'r', { min: 4, max: 40, hint: obj.kind === 'ball' ? 'The ball size used by physics collisions.' : 'How close the handle has to get for onTouch to fire.' }),
+      obj.kind !== 'ball' ? field('Say on touch', say) : null,
+      obj.kind !== 'ball' ? field('Play on touch', sndSel, sounds.length ? null : 'Add sounds in the Sounds tab.') : null,
+      obj.kind !== 'ball' ? check('Tangible: round wall on the device', 'solid', 'Unchecked, the object is only visible and reacts to touch. Checked, the runtime creates a round wall; moving objects are only re-sent when they stop.') : null,
       obj.kind === 'item' ? check('Disappears when collected', 'vanish', null, true) : null,
-      select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
+      obj.kind !== 'ball' ? select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me') : null,
+      ballBounce(),
+      obj.kind !== 'ball' && obj.bounceBall ? range('Bounce width', 'bounceWidth', { min: 1, max: 40, initial: obj.r ?? 10 }) : null,
+      obj.kind !== 'ball' && obj.bounceBall ? range('Bounce depth', 'bounceDepth', { min: 1, max: 20, initial: obj.r ?? 10 }) : null,
+      obj.kind === 'ball' ? range('Speed', 'speed', { min: 1, max: 100, unit: ' mm/s' }) : null,
+      obj.kind === 'ball' ? range('Launch angle', 'angle', { min: 0, max: 6.28, step: 0.05, unit: ' rad' }) : null,
+      obj.kind === 'ball' ? range('Serve spread', 'serveAngle', { min: 0, max: 1.5, step: 0.05, unit: ' rad' }) : null,
+      obj.kind === 'ball' ? range('Speed increase per bounce', 'bounceSpeedup', { min: 1, max: 1.5, step: 0.01, unit: '×' }) : null,
+      obj.kind === 'ball' ? range('Paddle bounce angle', 'bounceAngle', { min: 0, max: 1.5, step: 0.05, unit: ' rad' }) : null,
+      obj.kind === 'ball' ? range('Handle bounce width', 'handleBounceWidth', { min: 1, max: 40 }) : null,
+      obj.kind === 'ball' ? range('Handle bounce depth', 'handleBounceDepth', { min: 1, max: 20 }) : null,
+      obj.kind === 'ball' ? check('Moving on start', 'moving', 'Start this ball immediately when the level loads.') : null,
+      obj.kind === 'ball' ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Bounces off handles'), ...['me', 'it'].map((handle) => {
+        const input = h('input', { type: 'checkbox', checked: (obj.bounceHandles ?? []).includes(handle) });
+        input.addEventListener('change', () => {
+          const values = new Set(obj.bounceHandles ?? []);
+          if (input.checked) values.add(handle); else values.delete(handle);
+          ed.update(obj, { bounceHandles: [...values] });
+        });
+        return h('label', { class: 'check' }, input, handle === 'me' ? 'Me handle' : 'It handle');
+      })) : null,
       check('Visible on start', 'enabled', null, true)
     );
   } else if (obj.type === 'zone') {
@@ -931,6 +980,7 @@ function renderProps(obj) {
     panel.append(
       field('Say on enter', say),
       select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
+      ballBounce(),
       check('Active on start', 'enabled', null, true)
     );
   }
