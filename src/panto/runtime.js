@@ -708,6 +708,15 @@ export class Runtime extends Emitter {
     this.emit('level', level);
     this._changed();
 
+    // Establish the spawn positions before running any level logic. A level
+    // script can immediately start patrols, following, or other handle moves;
+    // those commands would supersede the spawn move if the script ran first.
+    const moves = [];
+    if (data.spawn?.me) moves.push(this.me.moveTo(data.spawn.me, { speed: 250 }));
+    if (data.spawn?.it) moves.push(this.it.moveTo(data.spawn.it, { speed: 250 }));
+    await Promise.all(moves);
+    if (loadToken !== this._levelLoadToken || !this.running) return level;
+
     // a level built in code (panto.defineLevel): run its builder in the level scope
     if (code) {
       try {
@@ -733,14 +742,10 @@ export class Runtime extends Emitter {
       }
     }
 
-    const moves = [];
-    if (data.spawn?.me) moves.push(this.me.moveTo(data.spawn.me, {speed:250}));
-    if (data.spawn?.it) moves.push(this.it.moveTo(data.spawn.it, {speed:250}));
     if (data.intro) this.speak(data.intro, { interrupt: true });
     for (const h of this._levelHandlers) {
       if (h.name == null || h.name === name) h.fn(level);
     }
-    await Promise.all(moves);
     if (loadToken === this._levelLoadToken) {
       this._deferObstacleActivation = false;
       for (const o of this.objects.values()) {

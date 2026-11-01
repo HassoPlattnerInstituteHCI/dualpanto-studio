@@ -94,16 +94,45 @@ export class Handle {
         target,
         corrections: 0,
         settledSamples: 0,
+        positionSamples: 0,
+        startPos: { ...this._pos },
+        lastPos: { ...this._pos },
+        movementSeen: false,
+        stillSamples: 0,
+        ended: false,
         timer: null,
         checkPosition: () => {
-          if (this._transition !== t || t.corrections === 0) return;
-          t.settledSamples = dist(this._pos, t.target) <= tolerance ? t.settledSamples + 1 : 0;
-          // Some devices do not emit transitionEnded for a retargeted move.
-          // Require two in-tolerance position reports to avoid resolving on a
-          // single sample as the handle passes through the target.
-          if (t.settledSamples >= 2) t.resolve(true);
+          if (this._transition !== t) return;
+          const moved = dist(t.startPos, this._pos);
+          if (moved > 1) t.movementSeen = true;
+          if (t.ended) t.positionSamples++;
+          const remaining = dist(this._pos, t.target);
+          t.settledSamples = remaining <= tolerance ? t.settledSamples + 1 : 0;
+          const step = dist(t.lastPos, this._pos);
+          t.stillSamples = step <= 0.25 ? t.stillSamples + 1 : 0;
+          t.lastPos = { ...this._pos };
+
+          // Position packets are the reliable arrival signal. TRANSITION_ENDED
+          // is absent on some firmware versions, so also detect when movement
+          // has stopped short and correct immediately instead of waiting for
+          // the long timeout below.
+          if (t.settledSamples >= 2) t.finish(true);
+          else if (t.ended && t.positionSamples >= 2) t.finish(true);
+          else if (t.movementSeen && t.stillSamples >= 4) t.finish(true);
         },
         resolve: (arrived) => {
+          if (this._transition !== t) return;
+          // TRANSITION_ENDED can arrive before the matching position packet.
+          // Wait for position reports before deciding the move needs a correction.
+          if (arrived !== false && t.corrections === 0 && !t.ended) {
+            t.ended = true;
+            t.positionSamples = 0;
+            t.settledSamples = 0;
+            return;
+          }
+          t.finish(arrived);
+        },
+        finish: (arrived) => {
           if (this._transition !== t) return;
           if (arrived !== false && dist(this._pos, t.target) > tolerance) {
             if (t.corrections >= maxCorrections) {
@@ -112,11 +141,17 @@ export class Handle {
             }
             t.corrections++;
             t.settledSamples = 0;
+            t.positionSamples = 0;
+            t.ended = false;
+            t.startPos = { ...this._pos };
+            t.lastPos = { ...this._pos };
+            t.movementSeen = false;
+            t.stillSamples = 0;
             // Keep the already configured speed and send the correction directly.
             // setSpeed is a separate serial packet and adds a visible gap here.
             rt.device.moveHandle(this.index, t.target, rotation);
             clearTimeout(t.timer);
-            t.timer = null;
+            t.timer = setTimeout(() => t.finish(true), dur * 1000 + 500);
             return;
           }
           clearTimeout(t.timer);
@@ -125,7 +160,7 @@ export class Handle {
           resolve(arrived !== false);
         },
       };
-      t.timer = setTimeout(() => t.resolve(true), dur * 1000 + 2000);
+      t.timer = setTimeout(() => t.finish(true), dur * 1000 + 500);
       this._transition = t;
       rt.device.setSpeed(this.index, Math.min(100, 1 / dur));
       rt.device.moveHandle(this.index, target, rotation);
@@ -267,7 +302,10 @@ export class Handle {
     f.last = now;
     f.sent = target;
     const step = dist(this._pos, target);
-    const dur = Math.max(dur0, step / Math.max(1, f.speed)); // don't take big jumps at full speed
+    // Short corrections need a quicker transition to build a firm pull. Keep
+    // long moves at their configured speed, but let small steps complete in
+    // half the usual follow interval while still overlapping successive aims.
+    const dur = Math.max(dur0 * 0.5, step / Math.max(1, f.speed));
     if (!f.durSent || Math.abs(dur - f.durSent) / f.durSent > 0.2) {
       rt.device.setSpeed(this.index, Math.min(100, 1 / dur));
       f.durSent = dur;
