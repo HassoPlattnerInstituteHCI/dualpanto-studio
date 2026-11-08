@@ -7,8 +7,11 @@
 //
 // The project chooses a voice by name (settings.tts.voice). A name that does not exist on
 // this computer falls back to the first voice of the project language.
+//
+// settings.tts.engine 'piper' uses a downloaded Piper voice instead (settings.tts.piperVoice,
+// see piper.js), which sounds the same everywhere; without the download it falls back here.
 
-export const TTS_DEFAULTS = Object.freeze({ voice: '', rate: 1, pitch: 1 });
+export const TTS_DEFAULTS = Object.freeze({ engine: 'system', voice: '', piperVoice: '', rate: 1, pitch: 1 });
 
 export const ttsSupported = () => typeof speechSynthesis !== 'undefined';
 

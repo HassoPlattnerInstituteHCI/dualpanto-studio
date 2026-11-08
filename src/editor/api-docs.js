@@ -263,9 +263,10 @@ declare const panto: {
 declare const me: PantoHandle;
 declare const it: PantoHandle;
 /**
- * Speech output with the voice, rate and pitch from Sounds → TTS. The promise resolves when
- * speaking is done. rate/pitch are relative to the project setting; voice is (part of) a
- * voice name for this one sentence, e.g. "Samantha".
+ * Speech output with the engine, voice, rate and pitch from Sounds → TTS. The promise resolves
+ * when speaking is done. rate/pitch are relative to the project setting (pitch: built-in voices
+ * only); voice is (part of) a voice name for this one sentence, e.g. "Samantha", or a downloaded
+ * voice like "Cori".
  */
 declare function speak(text: string, options?: { interrupt?: boolean; lang?: string; rate?: number; pitch?: number; voice?: string }): Promise<void>;
 interface SoundHandle { stop(): void; readonly ended: Promise<void> }
@@ -527,7 +528,7 @@ panto.time        // seconds since start`)}
 <section>
   <h3>Output &amp; input</h3>
   ${code(`await speak("Hello");   speak("Right now", { interrupt: true });
-speak("Faster", { rate: 1.4 });   speak("Other voice", { voice: "Samantha" });
+speak("Faster", { rate: 1.4 });   speak("Other voice", { voice: "Cori" });
 sound.beep(440, 150);   sound.tick();   sound.success();
 onKey("Enter", () => …);  onKey("Space", …);  onKey("n", …)
 listen(["start", "stop"], (cmd) => …)    // voice input

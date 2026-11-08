@@ -21,6 +21,7 @@ import { StopSignal, Scope } from './scope.js';
 import { Handle } from './handle.js';
 import { WorldObject, Obstacle, Zone, Entity, entityArgs } from './objects.js';
 import { loadVoices, makeUtterance, ttsSettings, ttsSupported, hasVoice, findVoice } from './tts.js';
+import { piper, piperVoice, piperSupported, storedPiperVoices, splitSentences, DEFAULT_PIPER_VOICE } from './piper.js';
 import { Level } from './level.js';
 import { createMenu } from './menu.js';
 
@@ -84,6 +85,7 @@ export class Runtime extends Emitter {
     this._startTicker();
     this.log('info', `▶ Start (${d.kind === 'serial' ? 'DualPanto' : 'Emulator'})`);
     this._checkVoices();
+    this._startPiper();
     try {
       await this._setupBoundary();
     } catch (e) {
@@ -133,9 +135,7 @@ export class Runtime extends Emitter {
     this._unsub = [];
     window.removeEventListener('keydown', this._onKeyDown);
     this.stopSounds();
-    try {
-      speechSynthesis.cancel();
-    } catch {}
+    this._stopSpeech();
     this.voice.dispose();
     this._audio?.close?.();
     this.caption = '';
@@ -814,6 +814,7 @@ export class Runtime extends Emitter {
     for (const o of data.objects ?? []) this._instantiate(o); // _register adds them to level.objects
     this.log('info', `Level "${name}" loaded`);
     this.emit('level', level);
+    this._warmSpeech([data.intro, ...(data.objects ?? []).map((o) => o.speak)]);
     this._changed();
 
     // Establish the spawn positions before running any level logic. A level
@@ -903,8 +904,10 @@ export class Runtime extends Emitter {
   /** Loads the speech voices once and says in the console when something is off. */
   _checkVoices() {
     this._voices = ttsSupported() ? speechSynthesis.getVoices() : [];
-    loadVoices().then((voices) => {
+    loadVoices().then(async (voices) => {
       this._voices = voices;
+      // a working downloaded voice does not need the built-in ones
+      if (this._piperLoad && (await this._piperLoad)) return;
       if (!this.running) return;
       const settings = ttsSettings(this.project);
       const lang = this.project.settings?.lang ?? 'en-US';
@@ -914,6 +917,51 @@ export class Runtime extends Emitter {
         this._warnOnce('voice-missing', `The voice "${settings.voice}" is not available on this computer – using "${findVoice(voices, '', lang)?.name ?? 'the default voice'}".`);
       }
     });
+  }
+
+  /** Downloaded-voice engine: load the voice right at the start; speech waits for it. */
+  _startPiper() {
+    this._piperLoad = null;
+    const settings = ttsSettings(this.project);
+    if (settings.engine !== 'piper') return;
+    const v = piperVoice(settings.piperVoice) ?? piperVoice(DEFAULT_PIPER_VOICE);
+    this._piperVoice = v.id;
+    this._piperStored = new Set();
+    this._piperLoad = (async () => {
+      this._piperStored = piperSupported() ? await storedPiperVoices().catch(() => new Set()) : new Set();
+      if (!this._piperStored.has(v.id)) {
+        this._warnOnce('piper-missing', `The voice "${v.label}" is not downloaded on this computer – using the built-in voice. Download it under Sounds → TTS.`);
+        return false;
+      }
+      try {
+        await piper.load(v.id);
+        return true;
+      } catch (e) {
+        this._warnOnce('piper-failed', `The voice "${v.label}" could not be loaded (${e.message}) – using the built-in voice.`);
+        return false;
+      }
+    })();
+  }
+
+  /** Computes the fixed texts of a level ("Say on …") in advance with a downloaded voice. */
+  _warmSpeech(texts) {
+    const list = texts.filter((t) => typeof t === 'string' && t.trim());
+    if (!this._piperLoad || !list.length) return;
+    const rate = ttsSettings(this.project).rate ?? 1;
+    this._piperLoad.then((ok) => ok && this.running && piper.warm(list, { voice: this._piperVoice, rate }));
+  }
+
+  /** Stops whatever is being said and drops what is still waiting. */
+  _stopSpeech() {
+    this._speechToken = (this._speechToken ?? 0) + 1;
+    this._speechChain = null;
+    try {
+      this._speechSource?.stop();
+    } catch {}
+    this._speechSource = null;
+    try {
+      speechSynthesis.cancel();
+    } catch {}
   }
 
   speak(text, { interrupt = false, lang, rate = 1, pitch = 1, voice } = {}) {
@@ -930,12 +978,23 @@ export class Runtime extends Emitter {
       this._speaking = false;
       this._spokeAt = Date.now();
     };
-    if (!this.running || typeof speechSynthesis === 'undefined') {
+    if (!this.running) {
+      spoken();
+      return Promise.resolve();
+    }
+    const opts = { interrupt, lang, rate, pitch, voice };
+    if (this._piperLoad) return this._speakPiper(text, opts, spoken);
+    return this._speakSystem(text, opts, spoken);
+  }
+
+  /** Built-in voices (Web Speech API). */
+  _speakSystem(text, { interrupt, lang, rate, pitch, voice }, spoken) {
+    if (typeof speechSynthesis === 'undefined') {
       spoken();
       return Promise.resolve();
     }
     this._speaking = true;
-    if (interrupt) speechSynthesis.cancel();
+    if (interrupt) this._stopSpeech();
     return new Promise((resolve) => {
       const voices = this._voices?.length ? this._voices : speechSynthesis.getVoices();
       if (voice && voices.length && !hasVoice(voices, voice)) this._warnOnce(`voice:${voice}`, `speak(): there is no voice "${voice}" on this computer – using the project voice.`);
@@ -954,6 +1013,59 @@ export class Runtime extends Emitter {
       // browsers without voices never fire "end": resolve after an estimate
       const timer = setTimeout(done, 1500 + (text.length * 90) / u.rate);
       speechSynthesis.speak(u);
+    });
+  }
+
+  /**
+   * Downloaded Piper voice: sentences are computed in the worker and played one after the
+   * other; while one plays, the next is computed. Calls queue up like speechSynthesis does,
+   * "interrupt" drops the queue. If the voice cannot be used, the built-in voice speaks.
+   */
+  _speakPiper(text, opts, spoken) {
+    this._speaking = true;
+    if (opts.interrupt) this._stopSpeech();
+    const token = this._speechToken ?? 0;
+    const job = (this._speechChain ?? Promise.resolve()).then(async () => {
+      if (token !== (this._speechToken ?? 0) || !this.running) return;
+      if (!(await this._piperLoad)) return this._speakSystem(text, { ...opts, interrupt: false }, () => {});
+      let v = this._piperVoice;
+      if (opts.voice) {
+        const wanted = piperVoice(opts.voice);
+        if (wanted && this._piperStored.has(wanted.id)) v = wanted.id;
+        else this._warnOnce(`piper-voice:${opts.voice}`, `speak(): "${opts.voice}" is not a downloaded voice – using the project voice.`);
+      }
+      const rate = (opts.rate ?? 1) * (ttsSettings(this.project).rate ?? 1);
+      const sentences = splitSentences(text);
+      let next = piper.synth(sentences[0], { voice: v, rate });
+      for (let i = 0; i < sentences.length; i++) {
+        const audio = await next.catch((e) => {
+          this._warnOnce('piper-synth', `Speech failed: ${e.message}`);
+          return null;
+        });
+        if (i + 1 < sentences.length) next = piper.synth(sentences[i + 1], { voice: v, rate });
+        if (token !== (this._speechToken ?? 0) || !this.running) return;
+        if (audio) await this._playSpeech(audio);
+      }
+    });
+    this._speechChain = job.catch(() => {});
+    return job.then(spoken, spoken);
+  }
+
+  _playSpeech({ samples, sampleRate }) {
+    const ctx = this._ctx();
+    ctx.resume?.();
+    const buffer = ctx.createBuffer(1, samples.length, sampleRate);
+    buffer.copyToChannel(samples, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    return new Promise((resolve) => {
+      src.onended = () => {
+        if (this._speechSource === src) this._speechSource = null;
+        resolve();
+      };
+      this._speechSource = src;
+      src.start();
     });
   }
 

@@ -327,6 +327,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .tts-status code { font: 11.5px var(--font-mono); }
 .tts-preview { display: flex; gap: 6px; align-items: center; }
+.piper-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.piper-voice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.piper-voice:last-child { border-bottom: 0; }
+.piper-voice.selected { background: var(--accent-soft); }
+.piper-voice input { accent-color: var(--accent); margin: 0; }
+.piper-voice-name { font-weight: 600; }
+.piper-voice-meta { display: block; font-size: 11.5px; color: var(--fg-muted); }
+.piper-voice-action { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
 .tts-preview input { flex: 1; min-width: 0; }
 .tts p code { font: 11.5px var(--font-mono); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
 

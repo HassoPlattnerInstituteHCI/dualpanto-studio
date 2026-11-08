@@ -89,6 +89,13 @@ Everything in a level has to be reachable with both handles. "Full area" shows t
 
 `speak()` and the "Say on …" texts use the browser's built-in voices (Web Speech API). Under Sounds → **TTS** the project picks a voice, rate and pitch, with a preview; the choice is saved in the project (`settings.tts`). `speak("…", { voice: "Name", rate: 1.4 })` changes them for one sentence (rate and pitch relative to the project setting). The voices come from the computer, so they differ between Windows, macOS and Linux; a project voice that does not exist on a computer falls back to the first voice of the project language, and the console says so. Chromium on Linux only has voices through speech-dispatcher (`sudo apt install speech-dispatcher espeak-ng`, start Chromium with `--enable-speech-dispatcher`); without any voice, `speak()` shows only the caption and the console warns once.
 
+**Downloaded voices (same on every computer).** Switch the engine to "Downloaded voices" to speak with a [Piper](https://github.com/rhasspy/piper) voice: a neural voice computed in the browser, so the project sounds the same on Linux, Windows and macOS, and works offline once downloaded. Offered are Kristin (US, female), Norman (US, male), Mike (US, male) and Cori (British, female) – all public domain or CC0. Each computer downloads a voice once (about 63 MB, from the official `rhasspy/piper-voices` on Hugging Face) into the browser's Cache Storage; "Remove" deletes it again. It is optional: on a computer without the download the built-in voice speaks, and the console says so.
+
+- `speak()` works the same: any text, computed at runtime. Text is split into sentences; while one plays, the next is computed (about 0.2–0.4 s for a short sentence on a current laptop). Sentences already spoken play immediately, and the "Say on …" texts of a level are computed in advance when it loads.
+- On ▶ Run the voice is loaded (about 2–3 s); speech waits for it rather than switching voices.
+- Rate works for both engines, pitch only for built-in voices. `speak("…", { voice: "Cori" })` uses another downloaded voice for one sentence.
+- The computation runs in a Web Worker (`src/panto/piper-worker.js`) so the handles keep moving. It uses onnxruntime-web 1.18.0 and the Piper phonemizer build of vits-web 1.0.3 from public CDNs; unlike vits-web, model and phonemizer stay loaded (vits-web rebuilds both for every sentence, ~1.5 s each).
+
 ### Sounds tab
 
 "Library" searches Freesound and imports previews into the project (see "Freesound search token" below). "Upload" lists the project's sounds (drag files onto the tab or press "Add Sounds"). "TTS" holds the speech settings (see above); "Record" is a placeholder for now.
@@ -183,6 +190,9 @@ src/panto/webserial.js      real device via Web Serial (handshake, heartbeat, AC
 src/panto/emulator.js       software panto: god object collision, rails, tweening
 src/panto/runtime.js        runs projects, entities/frame loop, script API
 src/panto/voice.js          voice input: patterns, number words, echo protection, ask/confirm
+src/panto/tts.js            speech output with the built-in voices: voice lookup, settings
+src/panto/piper.js          downloadable Piper voices: catalog, cache, worker client
+src/panto/piper-worker.js   Piper speech computed in a Web Worker
 src/panto/geometry.js       2D helpers
 src/editor/assets.js        sound storage (IndexedDB), export/import as Base64
 src/editor/folder.js        read/write a project as a folder (File System Access API)

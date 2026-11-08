@@ -23,6 +23,9 @@ import { Stage } from './editor/stage.js';
 import { fitView, drawWorld } from './editor/renderer.js';
 import { workAreaFor } from './panto/areas.js';
 import { loadVoices, voicesFor, makeUtterance, ttsSettings, ttsSupported, hasVoice, findVoice } from './panto/tts.js';
+import {
+  PIPER_VOICES, DEFAULT_PIPER_VOICE, piper, piperVoice, piperSupported, storedPiperVoices, removePiperVoice, splitSentences,
+} from './panto/piper.js';
 import { API_DTS, API_HTML } from './editor/api-docs.js';
 import { FREESOUND_API_TOKEN } from './editor/freesound-config.js';
 
@@ -586,14 +589,26 @@ function insertSnippet(snippet) {
 // speech output settings (Sounds → TTS), stored in project.settings.tts
 
 let ttsVoices = [];
+let ttsVoicesLoaded = false; // the list is fetched once; "voiceschanged" updates it
+const piperDownloads = new Map(); // voice id -> progress 0..1 while downloading
 
 async function renderTts() {
-  ttsVoices = await loadVoices();
+  if (!ttsVoicesLoaded) {
+    ttsVoices = await loadVoices();
+    ttsVoicesLoaded = true;
+  }
   const settings = ttsSettings(app.project);
   const lang = app.project.settings.lang ?? 'en-US';
   const own = voicesFor(ttsVoices, lang);
   const status = $('#tts-status');
-  if (!ttsSupported() || !ttsVoices.length) {
+  const usePiper = settings.engine === 'piper';
+  for (const b of document.querySelectorAll('#tts-engine button')) b.setAttribute('aria-checked', b.dataset.engine === settings.engine);
+  $('#tts-piper').hidden = !usePiper;
+  $('#tts-system').hidden = usePiper;
+  $('#tts-pitch-field').hidden = usePiper; // Piper voices have no pitch control
+  if (usePiper) {
+    await renderPiperVoices(settings);
+  } else if (!ttsSupported() || !ttsVoices.length) {
     status.dataset.state = 'none';
     status.replaceChildren(
       'This browser has no speech voices, so speak() only shows the caption. ',
@@ -623,6 +638,76 @@ async function renderTts() {
   $('#tts-pitch-out').textContent = `${(+settings.pitch).toFixed(2)}`;
 }
 
+/** Downloaded voices: pick one, download or remove it. */
+async function renderPiperVoices(settings) {
+  const stored = await storedPiperVoices().catch(() => new Set());
+  const current = piperVoice(settings.piperVoice) ?? piperVoice(DEFAULT_PIPER_VOICE);
+  const status = $('#tts-status');
+  if (!piperSupported()) {
+    status.dataset.state = 'none';
+    status.textContent = 'This browser cannot run downloaded voices. The built-in voice speaks.';
+  } else if (stored.has(current.id)) {
+    status.dataset.state = 'ok';
+    status.textContent = `${current.label} is downloaded – this project speaks with it on this computer.`;
+  } else {
+    status.dataset.state = 'none';
+    status.textContent = `${current.label} is not downloaded on this computer yet, so the built-in voice speaks. Download it below (about ${Math.round(current.mb)} MB, once).`;
+  }
+  const list = $('#tts-piper-list');
+  list.replaceChildren(
+    ...PIPER_VOICES.map((v) => {
+      const radio = h('input', { type: 'radio', name: 'piper-voice', value: v.id, checked: v.id === current.id, 'aria-label': v.label });
+      radio.addEventListener('change', () => {
+        setTts({ piperVoice: v.id });
+        renderTts();
+      });
+      const progress = piperDownloads.get(v.id);
+      let action;
+      if (progress != null) action = h('span', {}, `Downloading … ${Math.round(progress * 100)} %`);
+      else if (stored.has(v.id)) {
+        action = h('span', { class: 'piper-voice-action' }, '✓ downloaded',
+          h('button', { class: 'link-btn', onclick: () => removePiper(v) }, 'Remove'));
+      } else {
+        action = h('button', { class: 'btn btn-secondary btn-sm', onclick: () => downloadPiper(v) }, `Download ${Math.round(v.mb)} MB`);
+      }
+      return h('li', { class: 'piper-voice' + (v.id === current.id ? ' selected' : '') },
+        radio,
+        h('label', {},
+          h('span', { class: 'piper-voice-name' }, v.label),
+          h('span', { class: 'piper-voice-meta' }, `${v.accent} · ${v.license}`)),
+        h('span', { class: 'piper-voice-action' }, action));
+    })
+  );
+  // clicking the name selects the voice too
+  for (const li of list.children) li.querySelector('label').addEventListener('click', () => li.querySelector('input').click());
+}
+
+async function downloadPiper(v) {
+  piperDownloads.set(v.id, 0);
+  renderTts();
+  try {
+    await piper.download(v.id, (loaded, total) => {
+      piperDownloads.set(v.id, total ? loaded / total : 0);
+      const row = [...$('#tts-piper-list').children].find((li) => li.querySelector('input').value === v.id);
+      const label = row?.querySelector('.piper-voice-action span');
+      if (label) label.textContent = `Downloading … ${Math.round((loaded / (total || loaded)) * 100)} %`;
+    });
+    log('info', `Voice "${v.label}" downloaded. It stays in this browser.`);
+  } catch (e) {
+    log('error', `Downloading the voice "${v.label}" failed: ${e.message}`);
+  } finally {
+    piperDownloads.delete(v.id);
+    renderTts();
+  }
+}
+
+async function removePiper(v) {
+  if (!confirm(`Remove the voice "${v.label}" from this browser? It can be downloaded again any time.`)) return;
+  await removePiperVoice(v.id);
+  log('info', `Voice "${v.label}" removed from this browser.`);
+  renderTts();
+}
+
 const langLabel = (lang) => ({ en: 'English', de: 'German' })[String(lang).split('-')[0]] ?? lang;
 
 function setTts(patch) {
@@ -630,11 +715,54 @@ function setTts(patch) {
   scheduleSave();
 }
 
-function previewTts() {
-  if (!ttsSupported()) return;
-  speechSynthesis.cancel();
+let previewToken = 0;
+let previewSource = null;
+let previewCtx = null;
+
+function stopPreview() {
+  previewToken++;
+  try {
+    previewSource?.stop();
+  } catch {}
+  previewSource = null;
+  if (ttsSupported()) speechSynthesis.cancel();
+}
+
+async function previewTts() {
+  stopPreview();
+  const token = previewToken;
   const text = $('#tts-text').value.trim() || 'Hello.';
-  speechSynthesis.speak(makeUtterance(text, { voices: ttsVoices, settings: ttsSettings(app.project), lang: app.project.settings.lang ?? 'en-US' }));
+  const settings = ttsSettings(app.project);
+  const v = piperVoice(settings.piperVoice) ?? piperVoice(DEFAULT_PIPER_VOICE);
+  if (settings.engine === 'piper' && piperSupported() && (await storedPiperVoices()).has(v.id)) {
+    const btn = $('#tts-play');
+    btn.textContent = 'Loading …';
+    try {
+      previewCtx ??= new AudioContext();
+      await previewCtx.resume();
+      for (const sentence of splitSentences(text)) {
+        const { samples, sampleRate } = await piper.synth(sentence, { voice: v.id, rate: settings.rate });
+        if (token !== previewToken) return;
+        btn.textContent = '▶ Play';
+        const buffer = previewCtx.createBuffer(1, samples.length, sampleRate);
+        buffer.copyToChannel(samples, 0);
+        previewSource = previewCtx.createBufferSource();
+        previewSource.buffer = buffer;
+        previewSource.connect(previewCtx.destination);
+        await new Promise((resolve) => {
+          previewSource.onended = resolve;
+          previewSource.start();
+        });
+      }
+    } catch (e) {
+      log('error', `Preview failed: ${e.message}`);
+    } finally {
+      btn.textContent = '▶ Play';
+    }
+    return;
+  }
+  if (!ttsSupported()) return;
+  speechSynthesis.speak(makeUtterance(text, { voices: ttsVoices, settings, lang: app.project.settings.lang ?? 'en-US' }));
 }
 
 function selectSoundTab(key) {
@@ -1596,6 +1724,13 @@ async function init() {
   $('#btn-add-level-empty').addEventListener('click', addLevel);
   $('#btn-add-sound').addEventListener('click', () => $('#file-sound').click());
   for (const b of document.querySelectorAll('[data-sound]')) b.addEventListener('click', () => selectSoundTab(b.dataset.sound));
+  for (const b of document.querySelectorAll('#tts-engine button')) {
+    b.addEventListener('click', () => {
+      stopPreview();
+      setTts({ engine: b.dataset.engine, piperVoice: ttsSettings(app.project).piperVoice || DEFAULT_PIPER_VOICE });
+      renderTts();
+    });
+  }
   $('#tts-voice').addEventListener('change', (e) => {
     setTts({ voice: e.target.value });
     renderTts();
@@ -1612,7 +1747,12 @@ async function init() {
   $('#tts-play').addEventListener('click', previewTts);
   $('#tts-text').addEventListener('keydown', (e) => e.key === 'Enter' && previewTts());
   $('#tts-insert').addEventListener('click', () => insertSnippet(`speak(${JSON.stringify($('#tts-text').value.trim() || 'Hello.')});`));
-  if (ttsSupported()) speechSynthesis.addEventListener('voiceschanged', () => !$('[data-sound-panel="tts"]').hidden && renderTts());
+  if (ttsSupported()) {
+    speechSynthesis.addEventListener('voiceschanged', () => {
+      ttsVoices = speechSynthesis.getVoices();
+      if (!$('[data-sound-panel="tts"]').hidden) renderTts();
+    });
+  }
   let soundTab = 'library';
   try {
     soundTab = localStorage.getItem('dualpanto-web:sound-tab') || soundTab;
