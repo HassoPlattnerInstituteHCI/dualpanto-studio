@@ -251,14 +251,15 @@ export class Emulator extends Emitter {
       p = add(contact, mul(n, EPS));
       q = add(p, slide);
     }
-    // rails pull the god object onto their line while the handle is close enough
+    // rails pull the god object onto their line while the handle is close enough; the nearest
+    // rail wins, so corners and crossings work, and a pull never goes through a wall
+    let rail = null;
     for (const r of this._railsFor(index)) {
-      const c = closestOnSegment(to, r.points[0], r.points[1]);
-      if (dist(c.point, to) <= r.displacement) {
-        p = c.point;
-        break;
-      }
+      const point = closestOnSegment(to, r.points[0], r.points[1]).point;
+      const d = dist(point, to);
+      if (d <= r.displacement && (!rail || d < rail.d)) rail = { point, d };
     }
+    if (rail && !walls.some((w) => !w.passable && segmentIntersection(p, rail.point, w.a, w.b) != null)) p = rail.point;
     return p;
   }
 

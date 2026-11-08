@@ -1,0 +1,714 @@
+{
+  "version": 1,
+  "id": "tpl_pacman",
+  "name": "Pac-Man",
+  "description": "Pac-Man for the DualPanto, built up in levels: corridor, turns, pellets, junctions.",
+  "script": "// Pac-Man for the DualPanto, built up in small steps: every level adds one new thing.\n// You are Pac-Man: the Me handle. Each corridor is made of walls with a rail along its\n// center, so the hand is guided and cannot leave the maze.\n\n// R = start the current level again\nonKey(\"r\", () => panto.loadLevel(panto.level.name));\n",
+  "levels": [
+    {
+      "id": "l1",
+      "name": "Corridor",
+      "view": "square",
+      "intro": "Level 1. Go right.",
+      "script": "// Level 1: feel the corridor and follow it to the end.\nlevel.zone(\"End\").onEnter(async () => {\n  await sound.success();\n  await speak(\"Well done.\");\n  panto.loadLevel(\"Turns\");\n});\n",
+      "spawn": {
+        "me": {
+          "x": 146,
+          "y": 103
+        }
+      },
+      "objects": [
+        {
+          "id": "w1",
+          "type": "wall",
+          "name": "Corridor",
+          "points": [
+            {
+              "x": 140,
+              "y": 96
+            },
+            {
+              "x": 220,
+              "y": 96
+            },
+            {
+              "x": 220,
+              "y": 110
+            },
+            {
+              "x": 140,
+              "y": 110
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "r1",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 146,
+              "y": 103
+            },
+            {
+              "x": 214,
+              "y": 103
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "z1",
+          "type": "zone",
+          "name": "End",
+          "shape": "circle",
+          "x": 212,
+          "y": 103,
+          "r": 7,
+          "speak": ""
+        }
+      ]
+    },
+    {
+      "id": "l2",
+      "name": "Turns",
+      "view": "square",
+      "intro": "Level 2. Two corners.",
+      "script": "// Level 2: corners. The corridor turns twice.\nlevel.zone(\"End\").onEnter(async () => {\n  await sound.success();\n  await speak(\"Well done.\");\n  panto.loadLevel(\"Pellets\");\n});\n",
+      "spawn": {
+        "me": {
+          "x": 146,
+          "y": 71
+        }
+      },
+      "objects": [
+        {
+          "id": "w2",
+          "type": "wall",
+          "name": "Corridor",
+          "points": [
+            {
+              "x": 140,
+              "y": 64
+            },
+            {
+              "x": 220,
+              "y": 64
+            },
+            {
+              "x": 220,
+              "y": 142
+            },
+            {
+              "x": 154,
+              "y": 142
+            },
+            {
+              "x": 154,
+              "y": 128
+            },
+            {
+              "x": 206,
+              "y": 128
+            },
+            {
+              "x": 206,
+              "y": 78
+            },
+            {
+              "x": 140,
+              "y": 78
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "r2",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 146,
+              "y": 71
+            },
+            {
+              "x": 213,
+              "y": 71
+            },
+            {
+              "x": 213,
+              "y": 135
+            },
+            {
+              "x": 160,
+              "y": 135
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "z2",
+          "type": "zone",
+          "name": "Corner 1",
+          "shape": "circle",
+          "x": 213,
+          "y": 71,
+          "r": 7,
+          "speak": "Corner."
+        },
+        {
+          "id": "z3",
+          "type": "zone",
+          "name": "Corner 2",
+          "shape": "circle",
+          "x": 213,
+          "y": 135,
+          "r": 7,
+          "speak": "Corner."
+        },
+        {
+          "id": "z4",
+          "type": "zone",
+          "name": "End",
+          "shape": "circle",
+          "x": 162,
+          "y": 135,
+          "r": 7,
+          "speak": ""
+        }
+      ]
+    },
+    {
+      "id": "l3",
+      "name": "Pellets",
+      "view": "square",
+      "intro": "Level 3. Eat all pellets.",
+      "script": "// Level 3: pellets. Eat them all; speech counts how many are left.\nconst pellets = level.items();\nlet eaten = 0;\n\nfor (const pellet of pellets) {\n  pellet.onCollect(async () => {\n    eaten++;\n    const left = pellets.length - eaten;\n    if (left > 1) speak(left + \" left.\", { interrupt: true });\n    else if (left === 1) speak(\"One left.\", { interrupt: true });\n    else {\n      await sound.success();\n      await speak(\"Well done.\", { interrupt: true });\n      panto.loadLevel(\"Junctions\");\n    }\n  });\n}\n",
+      "spawn": {
+        "me": {
+          "x": 147,
+          "y": 135
+        }
+      },
+      "objects": [
+        {
+          "id": "w3",
+          "type": "wall",
+          "name": "Corridor",
+          "points": [
+            {
+              "x": 140,
+              "y": 142
+            },
+            {
+              "x": 140,
+              "y": 64
+            },
+            {
+              "x": 220,
+              "y": 64
+            },
+            {
+              "x": 220,
+              "y": 142
+            },
+            {
+              "x": 206,
+              "y": 142
+            },
+            {
+              "x": 206,
+              "y": 78
+            },
+            {
+              "x": 154,
+              "y": 78
+            },
+            {
+              "x": 154,
+              "y": 142
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "r3",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 147,
+              "y": 135
+            },
+            {
+              "x": 147,
+              "y": 71
+            },
+            {
+              "x": 213,
+              "y": 71
+            },
+            {
+              "x": 213,
+              "y": 135
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "p1",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 1",
+          "x": 147,
+          "y": 100,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p2",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 2",
+          "x": 170,
+          "y": 71,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p3",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 3",
+          "x": 190,
+          "y": 71,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p4",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 4",
+          "x": 213,
+          "y": 90,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p5",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 5",
+          "x": 213,
+          "y": 120,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        }
+      ]
+    },
+    {
+      "id": "l4",
+      "name": "Junctions",
+      "view": "square",
+      "intro": "Level 4. Junctions. Eat all pellets.",
+      "script": "// Level 4: junctions. Three corridors cross three others; each junction says which ways are open.\nconst pellets = level.items();\nlet eaten = 0;\n\nfor (const pellet of pellets) {\n  pellet.onCollect(async () => {\n    eaten++;\n    const left = pellets.length - eaten;\n    if (left > 1) speak(left + \" left.\", { interrupt: true });\n    else if (left === 1) speak(\"One left.\", { interrupt: true });\n    else {\n      await sound.success();\n      speak(\"Maze finished!\", { interrupt: true });\n    }\n  });\n}\n",
+      "spawn": {
+        "me": {
+          "x": 147,
+          "y": 71
+        }
+      },
+      "objects": [
+        {
+          "id": "w4",
+          "type": "wall",
+          "name": "Outer wall",
+          "points": [
+            {
+              "x": 140,
+              "y": 64
+            },
+            {
+              "x": 220,
+              "y": 64
+            },
+            {
+              "x": 220,
+              "y": 142
+            },
+            {
+              "x": 140,
+              "y": 142
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "w5",
+          "type": "wall",
+          "name": "Block",
+          "points": [
+            {
+              "x": 154,
+              "y": 78
+            },
+            {
+              "x": 173,
+              "y": 78
+            },
+            {
+              "x": 173,
+              "y": 96
+            },
+            {
+              "x": 154,
+              "y": 96
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "w6",
+          "type": "wall",
+          "name": "Block",
+          "points": [
+            {
+              "x": 187,
+              "y": 78
+            },
+            {
+              "x": 206,
+              "y": 78
+            },
+            {
+              "x": 206,
+              "y": 96
+            },
+            {
+              "x": 187,
+              "y": 96
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "w7",
+          "type": "wall",
+          "name": "Block",
+          "points": [
+            {
+              "x": 154,
+              "y": 110
+            },
+            {
+              "x": 173,
+              "y": 110
+            },
+            {
+              "x": 173,
+              "y": 128
+            },
+            {
+              "x": 154,
+              "y": 128
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "w8",
+          "type": "wall",
+          "name": "Block",
+          "points": [
+            {
+              "x": 187,
+              "y": 110
+            },
+            {
+              "x": 206,
+              "y": 110
+            },
+            {
+              "x": 206,
+              "y": 128
+            },
+            {
+              "x": 187,
+              "y": 128
+            }
+          ],
+          "closed": true,
+          "handles": "me"
+        },
+        {
+          "id": "r4",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 147,
+              "y": 71
+            },
+            {
+              "x": 213,
+              "y": 71
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "r5",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 147,
+              "y": 103
+            },
+            {
+              "x": 213,
+              "y": 103
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "r6",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 147,
+              "y": 135
+            },
+            {
+              "x": 213,
+              "y": 135
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "r7",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 147,
+              "y": 71
+            },
+            {
+              "x": 147,
+              "y": 135
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "r8",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 180,
+              "y": 71
+            },
+            {
+              "x": 180,
+              "y": 135
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "r9",
+          "type": "rail",
+          "name": "Path",
+          "points": [
+            {
+              "x": 213,
+              "y": 71
+            },
+            {
+              "x": 213,
+              "y": 135
+            }
+          ],
+          "strength": 8,
+          "handles": "me"
+        },
+        {
+          "id": "z5",
+          "type": "zone",
+          "name": "Junction top",
+          "shape": "circle",
+          "x": 180,
+          "y": 71,
+          "r": 6,
+          "speak": "Left, right, down."
+        },
+        {
+          "id": "z6",
+          "type": "zone",
+          "name": "Junction left",
+          "shape": "circle",
+          "x": 147,
+          "y": 103,
+          "r": 6,
+          "speak": "Up, down, right."
+        },
+        {
+          "id": "z7",
+          "type": "zone",
+          "name": "Crossing",
+          "shape": "circle",
+          "x": 180,
+          "y": 103,
+          "r": 6,
+          "speak": "All ways."
+        },
+        {
+          "id": "z8",
+          "type": "zone",
+          "name": "Junction right",
+          "shape": "circle",
+          "x": 213,
+          "y": 103,
+          "r": 6,
+          "speak": "Up, down, left."
+        },
+        {
+          "id": "z9",
+          "type": "zone",
+          "name": "Junction bottom",
+          "shape": "circle",
+          "x": 180,
+          "y": 135,
+          "r": 6,
+          "speak": "Left, right, up."
+        },
+        {
+          "id": "p11",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 1",
+          "x": 196,
+          "y": 71,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p12",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 2",
+          "x": 147,
+          "y": 87,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p13",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 3",
+          "x": 180,
+          "y": 87,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p14",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 4",
+          "x": 196,
+          "y": 103,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p15",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 5",
+          "x": 213,
+          "y": 119,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        },
+        {
+          "id": "p16",
+          "type": "entity",
+          "kind": "item",
+          "shape": "circle",
+          "name": "Pellet 6",
+          "x": 163,
+          "y": 135,
+          "r": 6,
+          "speak": "",
+          "sound": "",
+          "solid": false,
+          "handle": "me"
+        }
+      ]
+    }
+  ]
+}
