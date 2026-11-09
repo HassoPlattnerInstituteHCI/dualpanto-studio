@@ -98,7 +98,7 @@ Everything in a level has to be reachable with both handles. "Full area" shows t
 
 ### Sounds tab
 
-"Library" searches Freesound and imports previews into the project (see "Freesound search token" below). "Upload" lists the project's sounds (drag files onto the tab or press "Add Sounds"). "TTS" holds the speech settings (see above); "Record" is a placeholder for now.
+"Library" searches Freesound and imports previews into the project (see "Freesound search token" below). "Upload" lists the project's sounds (drag files onto the tab or press "Add Sounds"). The ✎ button opens the **sound editor**: a waveform where you drag to select, then "Keep selection" (trim), "Delete selection", undo, volume (±24 dB), "Normalize", "Trim silence" and fade in/out, with playback of the selection (Space). "Save" replaces the sound with the result as a WAV file – an MP3 becomes `name.wav`, and the scripts and "Play on touch" fields are updated; "Save as copy" adds `name-edit.wav` and keeps the original. There is no hidden original: what is saved is what the project contains. "TTS" holds the speech settings (see above). **"Record"** records with the microphone: ● starts (after an optional 3-second countdown), a level meter shows whether the microphone picks you up, ■ stops (at most 30 s). The recording opens in the sound editor as mono – "Trim silence" removes the quiet start and end in one click – and "Add to sounds" saves it under the name from the Record tab (`recording-1.wav`, …). The microphone can be chosen once access was allowed.
 
 ## What's included
 

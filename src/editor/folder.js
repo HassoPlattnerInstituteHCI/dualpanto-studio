@@ -202,6 +202,16 @@ conflict in a script is an ordinary text conflict in git.
 To open: in the Studio, "Projects → Open folder".
 `;
 
+/** Whether two files have the same content. */
+async function sameBytes(a, b) {
+  const [x, y] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
+  if (x.byteLength !== y.byteLength) return false;
+  const u = new Uint8Array(x);
+  const v = new Uint8Array(y);
+  for (let i = 0; i < u.length; i++) if (u[i] !== v[i]) return false;
+  return true;
+}
+
 /**
  * Writes the project into the folder. Returns which files were written or removed.
  * Files that did not change are left alone.
@@ -260,7 +270,8 @@ export async function writeProjectToFolder(dir, project) {
       let same = false;
       if (existing.includes(a.name)) {
         const file = await (await soundsDir.getFileHandle(a.name)).getFile();
-        same = file.size === rec.blob.size;
+        // an edited sound can keep its size (e.g. only louder), so compare the bytes too
+        same = file.size === rec.blob.size && (await sameBytes(file, rec.blob));
       }
       if (!same) {
         await writeFile(soundsDir, a.name, rec.blob);

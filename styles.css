@@ -316,6 +316,36 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sound-panel.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; border-radius: 10px; }
 .sound-panel.placeholder { display: grid; place-items: center; text-align: center; }
 .library-source { margin: 8px 2px 0; }
+/* sound editor dialog (editor/sound-editor.js) */
+.dialog.sound-editor { width: min(900px, calc(100vw - 32px)); }
+.sound-wave-wrap { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.sound-wave { display: block; width: 100%; height: 180px; cursor: text; touch-action: none; outline: none; }
+.sound-wave:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.sound-edit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 12px; }
+.sound-edit-row .btn:disabled { opacity: 0.45; cursor: default; }
+.sound-edit-info { font-family: var(--font-mono); }
+.sound-edit-levels { gap: 10px 22px; }
+.sound-edit-slider { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--fg-muted); }
+.sound-edit-slider input { width: 180px; accent-color: var(--accent); }
+.sound-edit-slider output { font: 12px var(--font-mono); min-width: 64px; color: var(--fg); }
+.sound-edit-actions { margin-top: 16px; }
+.record { max-width: 560px; }
+.record .field input[type='text'], .record .field select {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-2);
+}
+.record-box { display: flex; align-items: center; gap: 16px; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); }
+.rec-btn {
+  flex: none; width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--border-strong);
+  background: var(--panel); color: var(--danger); font-size: 26px; line-height: 1; cursor: pointer;
+}
+.rec-btn:hover { border-color: var(--danger); }
+.rec-btn[data-state='recording'] { background: var(--danger); color: #fff; border-color: var(--danger); font-size: 20px; animation: voice-pulse 1.2s ease-in-out infinite; }
+.rec-btn[data-state='countdown'] { color: var(--fg); font: 700 22px var(--font-ui); }
+.record-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.rec-status { font-weight: 600; }
+.rec-meter { height: 8px; border-radius: 99px; background: var(--border); overflow: hidden; }
+.rec-level { height: 100%; width: 0; background: var(--ok); transition: width 60ms linear; }
+.rec-time { font: 12px var(--font-mono); color: var(--fg-muted); }
 .tts { max-width: 560px; }
 .tts .field select, .tts .field input[type='text'] {
   width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-2);

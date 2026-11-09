@@ -77,6 +77,19 @@ export async function putAsset(projectId, file, { name, source, sourceUrl, autho
   return meta(record);
 }
 
+/** Replaces the audio of a stored sound (after editing); id and project stay the same. */
+export async function replaceAsset(id, blob, { name, type } = {}) {
+  if (blob.size > MAX_ASSET_BYTES) {
+    throw new Error(`The edited sound is ${formatBytes(blob.size)}. Files can be at most ${formatBytes(MAX_ASSET_BYTES)}.`);
+  }
+  const rec = await getAsset(id);
+  if (!rec) throw new Error('This sound is no longer stored.');
+  const record = { ...rec, name: name ?? rec.name, type: type ?? blob.type ?? rec.type, size: blob.size, blob };
+  await tx('readwrite', (store) => store.put(record));
+  revokeUrl(id);
+  return meta(record);
+}
+
 export async function getAsset(id) {
   return tx('readonly', (store) => store.get(id));
 }

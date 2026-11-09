@@ -194,8 +194,19 @@
             <button id="btn-freesound-more" class="btn btn-secondary" type="button" hidden>Load more</button>
             <p class="muted small library-source">Source: Freesound.org</p>
           </div>
-          <div class="sound-panel placeholder" data-sound-panel="record" hidden>
-            <p class="muted">Record sounds with the microphone – coming soon.</p>
+          <div class="sound-panel record" data-sound-panel="record" hidden>
+            <div class="record-box">
+              <button id="rec-btn" class="rec-btn" type="button" data-state="idle" aria-label="Start recording" title="Start recording">●</button>
+              <div class="record-side">
+                <div id="rec-status" class="rec-status" role="status">Press ● to record.</div>
+                <div class="rec-meter" aria-hidden="true"><div id="rec-level" class="rec-level"></div></div>
+                <div id="rec-time" class="rec-time">0.0 s / 30 s</div>
+              </div>
+            </div>
+            <label class="field"><span class="field-label">Name</span><input id="rec-name" type="text" value="recording-1.wav" autocomplete="off" /></label>
+            <label class="field"><span class="field-label">Microphone</span><select id="rec-mic"><option value="">Default microphone</option></select></label>
+            <label class="check small"><input id="rec-countdown" type="checkbox" checked /> Count down 3 seconds before recording</label>
+            <p class="muted small">After recording, the editor opens: trim the silence, then save. At most 30 seconds.</p>
           </div>
           <div class="sound-panel tts" data-sound-panel="tts" hidden>
             <div class="field">

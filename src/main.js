@@ -10,7 +10,7 @@ import {
   exportProject, importProjectFile, uniqueLevelName, levelScriptTemplate, uid,
 } from './editor/project.js';
 import {
-  listAssets, putAsset, deleteAsset, deleteProjectAssets, assetUrl, assetUrlMap,
+  listAssets, putAsset, deleteAsset, deleteProjectAssets, assetUrl, assetUrlMap, getAsset, replaceAsset,
   formatBytes, isAudioFile, storageInfo, rememberFolder, forgetFolder, recentFolders,
 } from './editor/assets.js';
 import {
@@ -18,6 +18,9 @@ import {
   folderSnapshot, snapshotsDiffer, releaseAssets, hasProjectFile,
 } from './editor/folder.js';
 import { createCodeEditor } from './editor/code-editor.js';
+import { h } from './editor/dom.js';
+import { openSoundEditor } from './editor/sound-editor.js';
+import { Recorder, recordingSupported, microphones, micErrorText } from './editor/recorder.js';
 import { LevelEditor, TOOLS } from './editor/level-editor.js';
 import { Stage } from './editor/stage.js';
 import { fitView, drawWorld } from './editor/renderer.js';
@@ -33,17 +36,6 @@ import { FREESOUND_API_TOKEN } from './editor/freesound-config.js';
 export const BUILD = '2026-10-22 · new layout';
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const h = (tag, attrs = {}, ...children) => {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === 'class') el.className = v;
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (v === true) el.setAttribute(k, '');
-    else if (v !== false && v != null) el.setAttribute(k, v);
-  }
-  for (const c of children.flat()) if (c != null) el.append(c.nodeType ? c : document.createTextNode(c));
-  return el;
-};
 
 const app = {
   projects: [],
@@ -545,6 +537,7 @@ function renderSounds() {
         onclick: () => insertSnippet(soundSnippet(a.name)),
       }, h('span', { class: 'sound-name' }, a.name), h('span', { class: 'sound-size' }, formatBytes(a.size))),
       h('div', { class: 'sound-actions' },
+        h('button', { class: 'icon-btn', title: 'Edit: cut, volume, fades', 'aria-label': `Edit ${a.name}`, onclick: () => editSound(a) }, iconEdit()),
         h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${a.name}`, onclick: () => removeSound(a) }, iconTrash()))
     );
     list.append(item);
@@ -769,6 +762,7 @@ function selectSoundTab(key) {
   for (const b of document.querySelectorAll('[data-sound]')) b.setAttribute('aria-selected', b.dataset.sound === key);
   for (const p of document.querySelectorAll('[data-sound-panel]')) p.hidden = p.dataset.soundPanel !== key;
   if (key === 'tts') renderTts();
+  if (key === 'record') prepareRecordTab();
   try {
     localStorage.setItem('dualpanto-web:sound-tab', key);
   } catch {}
@@ -782,20 +776,10 @@ async function addSounds(files) {
       log('warn', `"${file.name}" is not an audio file – skipped.`);
       continue;
     }
-    let name = file.name;
-    const taken = new Set((app.project.assets ?? []).map((a) => a.name));
-    if (taken.has(name)) {
-      const dot = name.lastIndexOf('.');
-      const stem = dot > 0 ? name.slice(0, dot) : name;
-      const ext = dot > 0 ? name.slice(dot) : '';
-      let i = 2;
-      while (taken.has(`${stem}-${i}${ext}`)) i++;
-      name = `${stem}-${i}${ext}`;
-      log('info', `Name already taken, saved as "${name}".`);
-    }
+    const name = freeSoundName(file.name);
+    if (name !== file.name) log('info', `Name already taken, saved as "${name}".`);
     try {
-      const meta = await putAsset(app.project.id, file, { name });
-      app.project.assets = [...(app.project.assets ?? []), meta];
+      const meta = await storeSound(file, name);
       log('info', `Sound "${meta.name}" saved (${formatBytes(meta.size)}). Play it with sound.play("${meta.name}").`);
     } catch (e) {
       log('error', 'Saving failed: ' + e.message);
@@ -804,6 +788,189 @@ async function addSounds(files) {
   saveNow();
   selectSoundTab('upload');
   renderSounds();
+}
+
+/** A sound name that is not taken yet ("door.wav", "door-2.wav", …). */
+function freeSoundName(name, exceptId) {
+  const taken = new Set((app.project.assets ?? []).filter((x) => x.id !== exceptId).map((x) => x.name));
+  if (!taken.has(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let i = 2;
+  while (taken.has(`${stem}-${i}${ext}`)) i++;
+  return `${stem}-${i}${ext}`;
+}
+
+const asWavName = (name) => name.replace(/\.[^.]+$/, '') + '.wav';
+
+/** Stores audio as a new sound of the project. */
+async function storeSound(blob, name) {
+  const meta = await putAsset(app.project.id, blob, { name });
+  app.project.assets = [...(app.project.assets ?? []), meta];
+  return meta;
+}
+
+/** A sound got a new file name: update the scripts and the "Play on touch" fields. */
+function renameSoundReferences(oldName, newName) {
+  if (oldName === newName) return;
+  renameInScript(oldName, newName);
+  for (const level of app.project.levels) {
+    for (const o of level.objects) if (o.sound === oldName) o.sound = newName;
+  }
+}
+
+async function editSound(a) {
+  if (app.preview?.id === a.id) togglePreview(a);
+  try {
+    const rec = await getAsset(a.id);
+    if (!rec) return log('error', `"${a.name}" is no longer stored.`);
+    await openSoundEditor({
+      name: a.name,
+      blob: rec.blob,
+      onSave: async (wav) => {
+        const name = freeSoundName(asWavName(a.name), a.id);
+        const meta = await replaceAsset(a.id, wav, { name, type: 'audio/wav' });
+        app.project.assets = app.project.assets.map((x) => (x.id === a.id ? meta : x));
+        renameSoundReferences(a.name, name);
+        scheduleSave();
+        renderSounds();
+        log('info', name === a.name ? `Sound "${name}" saved.` : `Sound saved as "${name}" (WAV); scripts updated.`);
+      },
+      onSaveCopy: async (wav) => {
+        const name = freeSoundName(asWavName(a.name).replace(/\.wav$/, '-edit.wav'));
+        await storeSound(wav, name);
+        scheduleSave();
+        renderSounds();
+        log('info', `Edited copy saved as "${name}". Play it with sound.play("${name}").`);
+      },
+    });
+  } catch (e) {
+    log('error', `Cannot edit "${a.name}": ${e.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// recording (Sounds → Record): record, then trim and save in the sound editor
+
+const MAX_RECORD_SECONDS = 30;
+const rec = { state: 'idle', recorder: null, timer: 0, countdown: 0 };
+
+function setRecState(state, status) {
+  rec.state = state;
+  const b = $('#rec-btn');
+  b.dataset.state = state;
+  b.textContent = state === 'recording' ? '■' : '●';
+  const label = { idle: 'Start recording', countdown: 'Cancel', recording: 'Stop recording', busy: 'Please wait' }[state];
+  b.setAttribute('aria-label', label);
+  b.title = label;
+  b.disabled = state === 'busy';
+  if (status != null) $('#rec-status').textContent = status;
+  if (state !== 'recording') $('#rec-level').style.width = '0';
+}
+
+/** "recording-1.wav", "recording-2.wav", … whichever is free. */
+function nextRecordingName() {
+  const taken = new Set((app.project.assets ?? []).map((a) => a.name));
+  let i = 1;
+  while (taken.has(`recording-${i}.wav`)) i++;
+  return `recording-${i}.wav`;
+}
+
+/** Fresh microphone list, and a free name if the current one is taken by now. */
+function prepareRecordTab() {
+  renderMics();
+  const name = asWavName($('#rec-name').value.trim() || 'x');
+  if ((app.project.assets ?? []).some((a) => a.name === name)) $('#rec-name').value = nextRecordingName();
+}
+
+async function renderMics() {
+  const sel = $('#rec-mic');
+  const current = sel.value;
+  const list = await microphones().catch(() => []);
+  sel.replaceChildren(
+    h('option', { value: '' }, 'Default microphone'),
+    // names only appear once access was allowed
+    ...list.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => h('option', { value: d.deviceId }, d.label || `Microphone ${i + 1}`))
+  );
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+}
+
+function toggleRecording() {
+  if (rec.state === 'countdown') {
+    clearInterval(rec.countdown);
+    setRecState('idle', 'Cancelled.');
+  } else if (rec.state === 'recording') {
+    finishRecording();
+  } else if (rec.state === 'idle') {
+    if (!recordingSupported()) return setRecState('idle', 'This browser cannot record audio.');
+    if (!$('#rec-countdown').checked) return startRecording();
+    let n = 3;
+    setRecState('countdown', 'Get ready …');
+    $('#rec-btn').textContent = String(n);
+    rec.countdown = setInterval(() => {
+      n--;
+      if (n > 0) $('#rec-btn').textContent = String(n);
+      else {
+        clearInterval(rec.countdown);
+        startRecording();
+      }
+    }, 1000);
+  }
+}
+
+async function startRecording() {
+  setRecState('busy', 'Starting the microphone …');
+  const recorder = new Recorder();
+  try {
+    await recorder.start({
+      deviceId: $('#rec-mic').value || undefined,
+      onLevel: (v) => ($('#rec-level').style.width = `${Math.round(v * 100)}%`),
+    });
+  } catch (e) {
+    return setRecState('idle', micErrorText(e));
+  }
+  rec.recorder = recorder;
+  setRecState('recording', 'Recording … press ■ to stop.');
+  renderMics();
+  rec.timer = setInterval(() => {
+    const sec = rec.recorder?.seconds ?? 0;
+    $('#rec-time').textContent = `${sec.toFixed(1)} s / ${MAX_RECORD_SECONDS} s`;
+    if (sec >= MAX_RECORD_SECONDS) finishRecording();
+  }, 100);
+}
+
+async function finishRecording() {
+  clearInterval(rec.timer);
+  const recorder = rec.recorder;
+  rec.recorder = null;
+  if (!recorder) return;
+  setRecState('busy', 'Opening the editor …');
+  const blob = await recorder.stop();
+  $('#rec-time').textContent = `0.0 s / ${MAX_RECORD_SECONDS} s`;
+  setRecState('idle', blob?.size ? 'Press ● to record.' : 'Nothing was recorded.');
+  if (!blob?.size) return;
+  const wanted = asWavName($('#rec-name').value.trim() || nextRecordingName());
+  try {
+    await openSoundEditor({
+      name: wanted,
+      blob,
+      title: `New recording: ${wanted}`,
+      saveLabel: 'Add to sounds',
+      unsaved: true,
+      mono: true,
+      onSave: async (wav) => {
+        const name = freeSoundName(wanted);
+        await storeSound(wav, name);
+        scheduleSave();
+        renderSounds();
+        $('#rec-name').value = nextRecordingName();
+        log('info', `Recording saved as "${name}". Play it with sound.play("${name}").`);
+      },
+    });
+  } catch (e) {
+    setRecState('idle', `The recording could not be opened: ${e.message}`);
+  }
 }
 
 async function removeSound(a) {
@@ -1556,6 +1723,7 @@ function svg(path) {
   return el;
 }
 const iconTrash = () => svg('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>');
+const iconEdit = () => svg('<path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>');
 const iconCopy = () => svg('<rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" fill="none" stroke="currentColor" stroke-width="1.8"/>');
 
 // ---------------------------------------------------------------------------
@@ -1724,6 +1892,7 @@ async function init() {
   $('#btn-add-level-empty').addEventListener('click', addLevel);
   $('#btn-add-sound').addEventListener('click', () => $('#file-sound').click());
   for (const b of document.querySelectorAll('[data-sound]')) b.addEventListener('click', () => selectSoundTab(b.dataset.sound));
+  $('#rec-btn').addEventListener('click', toggleRecording);
   for (const b of document.querySelectorAll('#tts-engine button')) {
     b.addEventListener('click', () => {
       stopPreview();
