@@ -1237,7 +1237,9 @@ function renderProps(obj) {
       ...sounds.map((a) => h('option', { value: a.name, selected: obj.sound === a.name }, a.name)),
     ]);
     sndSel.addEventListener('change', () => ed.update(obj, { sound: sndSel.value }));
-    panel.append(
+    // Native Element.append() stringifies null into visible "null" text, so
+    // discard controls that do not apply to this entity kind.
+    panel.append(...[
       field('Kind', kindSel, 'Enemies and items react to handle touch. Ball is moved by the runtime physics engine.'),
       range(obj.kind === 'ball' ? 'Radius' : 'Radius (touch)', 'r', { min: 4, max: 40, hint: obj.kind === 'ball' ? 'The ball size used by physics collisions.' : 'How close the handle has to get for onTouch to fire.' }),
       obj.kind !== 'ball' ? field('Say on touch', say) : null,
@@ -1266,7 +1268,7 @@ function renderProps(obj) {
         return h('label', { class: 'check' }, input, handle === 'me' ? 'Me handle' : 'It handle');
       })) : null,
       check('Visible on start', 'enabled', null, true)
-    );
+    ].filter((child) => child != null));
   } else if (obj.type === 'zone') {
     const say = h('textarea', { rows: 2, placeholder: 'Optional, e.g. "You reached the goal."' });
     say.value = obj.speak ?? '';
