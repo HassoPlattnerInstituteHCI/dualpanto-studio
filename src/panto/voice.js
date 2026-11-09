@@ -9,10 +9,11 @@
 //    network, nothing works offline). `processLocally = true` forces on-device
 //    recognition if the browser supports it – `VoiceInput.deviceAvailable()` checks that.
 //
-// Interpretation uses patterns rather than a language model: placeholders, alternatives,
-// number words (English and German) and a tolerant comparison against recognition errors.
+// Pattern commands handle slots and exact control phrases. voice.intent() uses a small
+// sentence-embedding model locally to match paraphrases against designer examples.
 
 import { Emitter } from './emitter.js';
+import { intentModel, INTENT_MODEL_SIZE_MB } from './intent-model.js';
 
 const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
 
@@ -181,6 +182,12 @@ export class VoiceInput extends Emitter {
     this.manual = false; // true with push-to-talk: don't restart automatically
     this._rec = null;
     this._commands = new Set();
+    this._intents = new Set();
+    this._intentFired = new Set();
+    this._intentRevision = 0;
+    this._intentWarmSignature = '';
+    this._intentModelWarm = Promise.resolve(false);
+    this._intentModelFailed = false;
     this._text = new Set();
     this._partial = new Set();
     this._want = false;
@@ -377,10 +384,12 @@ export class VoiceInput extends Emitter {
     const res = ev.results[ev.results.length - 1];
     const alts = [...res].map((a) => a.transcript.trim()).filter(Boolean);
     const text = alts[0] ?? '';
+    const recognitionConfidence = Number.isFinite(res[0]?.confidence) ? res[0].confidence : null;
     if (!text) return;
     if (this.rt) this.rt.heard = text;
     if (!res.isFinal) {
       for (const fn of this._partial) fn(normalize(text), text);
+      this._dispatchIntents(alts, { final: false, recognitionConfidence }).catch((e) => this._intentModelWarning(e));
       this.emit('partial', text);
       this.rt?.emit?.('voice', { state: this.state, text, partial: true });
       return;
@@ -399,15 +408,100 @@ export class VoiceInput extends Emitter {
       done({ text, alts });
       return;
     }
+    this._handleFinalResult(alts, text, recognitionConfidence);
+  }
+
+  async _handleFinalResult(alts, text, recognitionConfidence) {
+    let intentMatched = false;
+    try {
+      intentMatched = await this._dispatchIntents(alts, { final: true, recognitionConfidence });
+    } catch (e) {
+      this._intentModelWarning(e);
+    }
     for (const fn of this._text) fn(normalize(text), text, alts);
-    this._dispatch(alts);
+    this._dispatch(alts, { suppressFallback: intentMatched });
+  }
+
+  /** Semantically compares open-ended transcripts with designer examples on-device. */
+  async _dispatchIntents(alts, { final, recognitionConfidence }) {
+    const revision = ++this._intentRevision;
+    const alreadyMatched = this._intentFired.size > 0;
+    const candidates = [...this._intents].filter((intent) =>
+      (!this._intentFired.has(intent) && (final || intent.interim)));
+    if (!candidates.length || !alts.length) {
+      if (final) this._intentFired.clear();
+      return alreadyMatched;
+    }
+
+    let match;
+    try {
+      if (this._intentModelFailed) throw new Error('model unavailable');
+      match = await intentModel.match(alts, candidates.map(({ name, examples, threshold }) => ({ id: name, examples, threshold })));
+    } catch (e) {
+      if (e?.message !== 'model unavailable') this._intentModelWarning(e);
+      // Keep the API usable if the model cannot download or run.
+      for (const intent of candidates) {
+        const hit = bestMatch(alts[0], intent.examples, Math.max(0.72, intent.threshold));
+        if (hit) {
+          match = { id: intent.name, score: hit.score, example: hit.option };
+          break;
+        }
+      }
+    }
+
+    if (!final && revision !== this._intentRevision) return false; // drop stale interim matches; always process final speech
+    const intent = candidates.find((candidate) => candidate.name === match?.id && this._intents.has(candidate));
+    if (intent && !this._intentFired.has(intent)) {
+      this._intentFired.add(intent);
+      intent.fn({
+        name: intent.name,
+        text: match.text ?? alts[0],
+        example: match.example,
+        confidence: match.score,
+        recognitionConfidence: recognitionConfidence == null ? null : recognitionConfidence,
+        final,
+      });
+    }
+    if (final) this._intentFired.clear();
+    return !!intent || alreadyMatched;
+  }
+
+  _warmIntentModel() {
+    if (!VoiceInput.supported || typeof Worker === 'undefined') return Promise.resolve(false);
+    const examples = [...new Set([...this._intents].flatMap((intent) => intent.examples))];
+    const signature = JSON.stringify(examples);
+    if (signature === this._intentWarmSignature) return this._intentModelWarm;
+    this._intentWarmSignature = signature;
+    if (!examples.length) return (this._intentModelWarm = Promise.resolve(true));
+    this.rt?.log('info', `Loading the on-device intent model (~${INTENT_MODEL_SIZE_MB} MB on first use)…`);
+    let lastPercent = -1;
+    this._intentModelWarm = intentModel.warm(examples, (progress) => {
+      const percent = Math.floor(progress / 25) * 25;
+      if (percent > lastPercent && percent < 100) {
+        lastPercent = percent;
+        this.rt?.log('device', `[Voice] Downloading intent model: ${percent}%`);
+      }
+    }).then(() => {
+      if (this.rt?.running) this.rt.log('info', 'On-device intent model ready.');
+      return true;
+    }).catch((e) => {
+      this._intentModelWarning(e);
+      return false;
+    });
+    return this._intentModelWarm;
+  }
+
+  _intentModelWarning(error) {
+    if (this._intentModelFailed) return;
+    this._intentModelFailed = true;
+    this.rt?.log('warn', `On-device intent model unavailable; using phrase matching: ${error?.message ?? error}`);
   }
 
   /**
    * Tries all recognition alternatives against all patterns: first as is, then with
    * unified umlauts. "*" is a catch-all pattern and only runs if no real pattern matched.
    */
-  _dispatch(alts) {
+  _dispatch(alts, { suppressFallback = false } = {}) {
     const commands = [...this._commands];
     const specific = commands.filter((c) => !c.fallback);
     const fallbacks = commands.filter((c) => c.fallback);
@@ -427,11 +521,11 @@ export class VoiceInput extends Emitter {
         if (hit) return true;
       }
     }
-    if (fallbacks.length) {
+    if (fallbacks.length && !suppressFallback) {
       for (const cmd of fallbacks) cmd.fn({ text: normalize(alts[0]) }, alts[0], cmd.raw);
       return true;
     }
-    if (specific.length) this.rt?.log('device', `[Microphone] no command matches "${alts[0]}"`);
+    if (specific.length && !suppressFallback) this.rt?.log('device', `[Microphone] no command matches "${alts[0]}"`);
     return false;
   }
 
@@ -447,6 +541,28 @@ export class VoiceInput extends Emitter {
     this._commands.add(entry);
     this._autoStart();
     return this.rt._scope(persistent).add(() => this._commands.delete(entry));
+  }
+
+  /**
+   * Maps a few example phrases to an action. Matches interim transcripts by default
+   * for quick game controls; each intent fires at most once per utterance.
+   */
+  intent(name, { examples = [], onMatch, threshold = 0.48, interim = true } = {}, { persistent = false } = {}) {
+    if (!Array.isArray(examples) || !examples.length) throw new TypeError('voice.intent() needs at least one example phrase.');
+    if (examples.some((phrase) => !String(phrase).trim())) throw new TypeError('voice.intent() examples cannot be empty.');
+    if (typeof onMatch !== 'function') throw new TypeError('voice.intent() needs an onMatch callback.');
+    if ([...this._intents].some((intent) => intent.name === name)) throw new TypeError(`voice.intent() name "${name}" is already registered.`);
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new RangeError('voice.intent() threshold must be between 0 and 1.');
+    const entry = { name, examples: examples.map((phrase) => String(phrase)), fn: this.rt._guard(onMatch), threshold, interim };
+    this._intents.add(entry);
+    this._warmIntentModel();
+    this._autoStart();
+    return this.rt._scope(persistent).add(() => { this._intents.delete(entry); this._intentFired.delete(entry); });
+  }
+
+  /** Resolves when the on-device intent model is ready, so a game can warm it before play. */
+  prepareIntents() {
+    return this._warmIntentModel();
   }
 
   /** Several commands at once: voice.commands({ "start": fn, "stop": fn }) */
@@ -589,6 +705,9 @@ export class VoiceInput extends Emitter {
     this._rec = null;
     if (this.rt) this.rt.heard = '';
     this._commands.clear();
+    this._intents.clear();
+    this._intentFired.clear();
+    this._intentRevision++;
     this._text.clear();
     this._partial.clear();
     this._setState('off');

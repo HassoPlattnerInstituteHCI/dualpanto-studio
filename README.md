@@ -112,7 +112,7 @@ Everything in a level has to be reachable with both handles. "Full area" shows t
 - **Scripts:** one **main script** (intro, score, level control, global keys) and one **level script** per level (select the level, then "Level" in the code editor's header). In the level script, `level` is defined; everything it creates is cleaned up when the level changes. Errors in the console link to the right file and line.
 - **Script API:** see the "API" tab in the app. The editor offers autocompletion for it.
 - **Levels in code:** `panto.defineLevel("Arena", (level) => { … })` registers a level that does not exist in the editor at all – good for randomly generated or data-driven levels. `panto.onFrame((dt) => …)` runs every frame (about 60 Hz) for your own game logic, `panto.time` is the running time in seconds. Objects created by a level script are found by `level.entity("…")`, `level.items()`, `level.zones()` just like drawn ones.
-- **Voice input:** voice commands with patterns (`voice.command("set score {n:number}", …)`), questions with spoken answers (`voice.ask`, `voice.confirm`), push-to-talk, English and German number words, tolerance against recognition errors. See below.
+- **Voice input:** open-ended speech mapped to actions with example phrases (`voice.intent(...)`), pattern commands (`voice.command("set score {n:number}", …)`), questions with spoken answers (`voice.ask`, `voice.confirm`), push-to-talk, English and German number words, tolerance against recognition errors. See below.
 - **Sounds:** upload MP3/WAV in the Sounds tab ("Add Sounds") or drag them onto it, or search, preview and import Freesound previews under "Library". Search includes all licenses; check each sound's license and attribution before use. Imported audio is available in the script with `sound.play("name.wav")` (also `loop`, `volume`, `rate`, `stop()`, `await …ended`).
 
 ### Freesound search token
@@ -133,7 +133,7 @@ The Web Speech API is available in Chrome and Edge on desktop – the same brows
 
 On start, the Studio does **not** check by itself whether on-device recognition is possible: `SpeechRecognition.available()` is experimental and crashed the renderer in a Chromium without a speech recognition service (headless, noticed during testing) – white page, and no `try/catch` catches that. The check only runs when a script calls `voice.localAvailable()`.
 
-Interpretation uses **patterns**, not a language model (that would need an API key and therefore a backend):
+Interpretation can use **patterns** for exact commands and slots, or a small on-device semantic model for paraphrases. No intent API key or server call is needed; the first intent downloads about 24 MB, then the model and its inference run in a worker on the computer and are cached by the browser:
 
 ```js
 voice.command("(start|begin|go) game", () => panto.loadLevel("Arena"));
@@ -141,10 +141,17 @@ voice.command("go to {target}", ({ target }) => speak("Looking for " + target));
 voice.command("set score {n:number}", ({ n }) => (state.score = n));  // "twenty-three" → 23
 voice.command("*", ({ text }) => log("not understood: " + text));     // catch-all
 
+voice.intent("move_left", {
+  examples: ["left", "move left", "go left"],
+  onMatch: ({ confidence, final }) => player.move(-1),
+}); // matches interim transcripts by default; one trigger per utterance
+
 const text = await voice.ask("What is the task called?");
 const n    = await voice.ask("How many points?", { expect: "number" });
 const yes  = await voice.confirm("Really delete?");
 ```
+
+`voice.intent(name, { examples, onMatch, threshold, interim })` compares transcript and example sentence embeddings locally, so the model can match paraphrases such as `"new task"`, `"create a task"` and `"insert an item"` without listing each phrase. The first use downloads about 24 MB of model weights; later runs use the browser cache. Loading and inference happen in a Web Worker. Call `await voice.prepareIntents()` during an intro if play should wait until the model is ready. `onMatch` receives `{ name, text, example, confidence, recognitionConfidence, final }`. `confidence` is cosine similarity (0–1), not a calibrated probability; `recognitionConfidence` is provided by the browser when available. Raise `threshold` to reject weaker matches. Interim matching is on by default for speed, so an action may run before the transcript is final. Each intent fires at most once per utterance. Set `interim: false` to wait for a final transcript. This compact model is English-oriented; projects using German speech should verify their own commands carefully. It classifies recognized text locally; Chrome's speech recognizer may still send microphone audio to its server unless on-device recognition is enabled.
 
 The last placeholder takes the rest of the sentence. Filler words before it, word endings ("starting" instead of "start") and umlaut spellings ("gruen"/"grün") are tolerated; `parseNumber`, `matchText` and `normalizeText` are also available on their own. The microphone pill in the run view's bar shows the state and toggles on click; recognised sentences appear in the console and the run view.
 
@@ -189,7 +196,9 @@ src/panto/protocol.js       DualPanto serial protocol rev. 6 (build and parse pa
 src/panto/webserial.js      real device via Web Serial (handshake, heartbeat, ACK/resend)
 src/panto/emulator.js       software panto: god object collision, rails, tweening
 src/panto/runtime.js        runs projects, entities/frame loop, script API
-src/panto/voice.js          voice input: patterns, number words, echo protection, ask/confirm
+src/panto/voice.js          voice input: patterns, semantic intents, number words, echo protection
+src/panto/intent-model.js   client for the on-device semantic intent model
+src/panto/intent-model-worker.js sentence embeddings and intent matching in a Web Worker
 src/panto/tts.js            speech output with the built-in voices: voice lookup, settings
 src/panto/piper.js          downloadable Piper voices: catalog, cache, worker client
 src/panto/piper-worker.js   Piper speech computed in a Web Worker

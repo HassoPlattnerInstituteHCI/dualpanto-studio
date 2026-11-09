@@ -1464,7 +1464,7 @@ function renderVoice(info) {
   const pill = $('#voice-status');
   const v = app.runtime?.voice;
   // visible as soon as a project uses voice input
-  const used = !!v && (v.state !== 'off' || v._commands?.size || v._text?.size || v._partial?.size);
+  const used = !!v && (v.state !== 'off' || v._commands?.size || v._intents?.size || v._text?.size || v._partial?.size);
   pill.hidden = !used;
   const state = v?.state ?? 'off';
   pill.dataset.state = state;

@@ -295,7 +295,7 @@ declare function onKey(key: string, fn: (key: string, event: KeyboardEvent) => v
 declare function listen(commands: string[] | null, fn: (command: string, text: string) => void): () => void;
 
 /**
- * Voice input (Chrome/Edge). Patterns with placeholders instead of a language model:
+ * Voice input (Chrome/Edge). Patterns with placeholders, or semantic intents:
  *   "go to {target}"        – {target} is the rest of the sentence
  *   "set score {n:number}"  – understands "three" and "3"
  *   "(start|begin) game"    – alternatives
@@ -314,6 +314,10 @@ declare const voice: {
   command(pattern: string, fn: (args: Record<string, any>, text: string) => void, options?: { persistent?: boolean }): () => void;
   /** Several at once: voice.commands({ "start": fn, "stop": fn }) */
   commands(map: Record<string, (args: Record<string, any>, text: string) => void>, options?: { persistent?: boolean }): () => void;
+  /** Maps example phrases to an action with a small on-device semantic model; downloads ~24 MB on first use. */
+  intent(name: string, options: { examples: string[]; onMatch: (match: { name: string; text: string; example: string; confidence: number; recognitionConfidence: number | null; final: boolean }) => void; threshold?: number; interim?: boolean }, registration?: { persistent?: boolean }): () => void;
+  /** Waits until the on-device intent model is ready. Call during an intro before time-critical play. */
+  prepareIntents(): Promise<boolean>;
   /** Every recognised sentence, without patterns. */
   onText(fn: (text: string, original: string, alternatives: string[]) => void, options?: { persistent?: boolean }): () => void;
   /** Interim result while the person is still speaking. */
@@ -537,15 +541,21 @@ const name = await ui.prompt("What's your name?");`)}
 <section>
   <h3>Voice input</h3>
   <p>The microphone is available in Chrome and Edge on desktop – the same browsers as Web Serial. The top right shows whether the program is listening; clicking it turns it on and off. The first time, the browser asks for permission. Recognition uses the project language (<code>en-US</code> for new projects).</p>
-  <p>Interpretation uses <b>patterns</b>, not a language model. Placeholders <code>{name}</code> extract parts of the sentence, <code>{name:number}</code> turns them into a number (<code>"twenty-three"</code> → <code>23</code>), round brackets allow alternatives. Filler words, word endings ("starting" instead of "start") and umlaut spellings are tolerated.</p>
+  <p>Use <b>intents</b> to map example phrases to actions using a compact sentence-embedding model that runs on-device in a worker. The first use downloads about 24 MB and the browser caches it. It can match paraphrases without listing every wording. Use <b>patterns</b> for slots such as numbers or names.</p>
   ${code(`voice.command("(start|begin|go) game", () => panto.loadLevel("Arena"));
 voice.command("go to {target}", ({ target }) => speak("Looking for " + target));
 voice.command("set score {n:number}", ({ n }) => state.score = n);
 voice.command("*", ({ text }) => log("not understood: " + text));   // catch-all
 
+voice.intent("move_left", {
+  examples: ["left", "move left", "go left"],
+  onMatch: ({ confidence, final }) => player.move(-1),
+});
+
 voice.onText((text) => log("heard: " + text));       // every sentence
 voice.onPartial((text) => …);                        // already while speaking
 voice.lastText     voice.isListening     voice.state`)}
+  <p>For <code>voice.intent</code>, <code>confidence</code> is cosine similarity (0–1), not a calibrated probability; browser recognition confidence is reported separately when available. Interim matches may act before the sentence is complete. Each intent fires once per utterance; set <code>interim: false</code> to wait for the final transcript. The compact model is English-oriented. This changes transcript interpretation; microphone recognition may still use Chrome's server unless on-device speech recognition is enabled.</p>
   <p><b>Asking questions</b> – better than <code>ui.prompt</code> when nobody sees the keyboard. The question is spoken, then the program listens; with no answer you get <code>null</code>.</p>
   ${code(`const text  = await voice.ask("What is the task called?");
 const score = await voice.ask("How many points?", { expect: "number" });
