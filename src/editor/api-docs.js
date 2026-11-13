@@ -135,6 +135,8 @@ interface EntityOptions {
   r?: number;
   name?: string;
   kind?: EntityKind;
+  /** Colour in the preview ("#e63946"). A marker with a colour is drawn as a filled square of 2r × 2r (a pixel). */
+  color?: string;
   /** Spoken on touch. */
   speak?: string;
   /** File name of an uploaded sound, played on touch. */

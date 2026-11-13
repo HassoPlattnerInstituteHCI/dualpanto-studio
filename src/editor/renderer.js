@@ -206,10 +206,22 @@ export function drawWorld(ctx, view, scene, opts = {}) {
 /** Enemies, items and markers: shown, optionally felt (solid). */
 function drawEntity(ctx, o, c, px, opts) {
   const selected = opts.selectedId != null && opts.selectedId === o.id;
-  const color = o.kind === 'enemy' ? c.enemy : o.kind === 'item' ? c.item : o.kind === 'ball' ? c.ball : c.muted;
+  const color = o.color || (o.kind === 'enemy' ? c.enemy : o.kind === 'item' ? c.item : o.kind === 'ball' ? c.ball : c.muted);
   const gone = o.collected || o.enabled === false;
   const r = Math.max(2, o.r ?? 10);
   ctx.globalAlpha = gone ? 0.22 : 1;
+  // a marker with its own colour is a pixel: a filled square of 2r × 2r
+  if (o.kind === 'marker' && o.color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(o.x - r, o.y - r, r * 2, r * 2);
+    if (selected) {
+      ctx.strokeStyle = c.select;
+      ctx.lineWidth = px(2.5);
+      ctx.strokeRect(o.x - r, o.y - r, r * 2, r * 2);
+    }
+    ctx.globalAlpha = 1;
+    return;
+  }
   // touch radius
   ctx.beginPath();
   ctx.arc(o.x, o.y, r, 0, Math.PI * 2);

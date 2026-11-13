@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "id": "tpl_paint",
+  "name": "Pixel painting",
+  "description": "Paint a picture with both handles: It reads colours, Me paints where It is. Colours by voice; level 2 lets It trace a colour, level 3 has a finer grid.",
+  "script": "// Pixel painting on the DualPanto: an 8 × 8 canvas you paint with both handles.\n//\n// Me is the brush, It is the reader. Move It with your other hand: every cell it\n// enters says its colour (a tick means empty). Bring Me onto the same cell as It to\n// put the pen down, then move both together to paint. Pull them apart to lift the pen.\n//\n// Voice commands (say them any time):\n//   \"red\", \"green\", \"blue\"   choose the colour and paint\n//   \"erase\"                  remove colour instead\n//   \"which colour\"           says the current colour or mode\n//\n// Three independent levels; switch with \"level one\", \"level two\", \"level three\":\n//   1 Canvas        8 × 8 cells\n//   2 Trace         like 1, plus \"show red\": It moves through all red cells\n//   3 Fine canvas   like 1 with 16 × 16 smaller cells\n//\n// The commands use voice.intent, so other wordings like \"make it blue\" work too. The\n// first run downloads the small on-device model (about 24 MB) and caches it.\n\nvoid voice.prepareIntents();\n\nvoice.command(\"level {n:number}\", ({ n }) => {\n  const name = panto.levels[n - 1];\n  if (!name) return speak(`There are ${panto.levels.length} levels.`, { interrupt: true });\n  panto.loadLevel(name);\n});\n",
+  "levels": [
+    {
+      "id": "l1",
+      "name": "Canvas",
+      "view": "square",
+      "intro": "Canvas. Bring Me to It to paint. Say a colour or erase.",
+      "script": "// Level \"Canvas\": 8 × 8 cells of 10 mm inside the frame.\n// Pen down when Me and It are in the same cell; it stays down until they are more\n// than 1.5 cells apart, so a small drift of one hand does not break the line.\n\nconst N = 8, CELL = 10, X0 = 140, Y0 = 63;\nconst PEN_UP_DISTANCE = 1.5 * CELL;\nconst COLORS = {\n  red:   { fill: \"#e63946\", tone: 330 },\n  green: { fill: \"#2a9d4b\", tone: 523 },\n  blue:  { fill: \"#2f6fdf\", tone: 784 },\n};\n\nconst pixels = new Array(N * N).fill(null); // colour name per cell, null = empty\nconst marks = new Array(N * N).fill(null);  // the coloured square in the preview\nlet color = \"red\";\nlet erasing = false;\nlet penDown = false;\n\n/** Cell index under a point, or -1 outside the canvas. */\nfunction cellAt(p) {\n  const col = Math.floor((p.x - X0) / CELL), row = Math.floor((p.y - Y0) / CELL);\n  return col >= 0 && col < N && row >= 0 && row < N ? row * N + col : -1;\n}\n\nfunction setPixel(i, value) {\n  if (i < 0 || pixels[i] === value) return;\n  pixels[i] = value;\n  marks[i]?.remove();\n  marks[i] = null;\n  if (value) {\n    const x = X0 + ((i % N) + 0.5) * CELL, y = Y0 + (Math.floor(i / N) + 0.5) * CELL;\n    marks[i] = panto.entity({ x, y, r: CELL / 2, color: COLORS[value].fill });\n    sound.beep(COLORS[value].tone, 70, { volume: 0.15 });\n  } else {\n    sound.tick();\n  }\n}\n\nasync function chirp(from, to) {\n  await sound.beep(from, 50, { volume: 0.15 });\n  sound.beep(to, 70, { volume: 0.15 });\n}\n\nfunction updatePen() {\n  const meCell = cellAt(me.position);\n  if (!penDown && meCell >= 0 && meCell === cellAt(it.position)) {\n    penDown = true;\n    chirp(500, 800);\n  } else if (penDown && (meCell < 0 || distance(me, it) > PEN_UP_DISTANCE)) {\n    penDown = false;\n    chirp(800, 500);\n  }\n  if (penDown) setPixel(meCell, erasing ? null : color);\n}\n\n// It reads: every new cell says its colour, a tick means empty\nlet itCell = -1;\nit.onMove((p) => {\n  updatePen();\n  const i = cellAt(p);\n  if (i === itCell) return;\n  itCell = i;\n  if (i < 0 || penDown) return;\n  if (pixels[i]) speak(pixels[i], { interrupt: true });\n  else sound.tick();\n});\n\n// Me draws: a quiet low click at each cell border while the pen is up\nlet meCell = -1;\nme.onMove((p) => {\n  updatePen();\n  const i = cellAt(p);\n  if (i === meCell) return;\n  meCell = i;\n  if (i >= 0 && !penDown) sound.beep(180, 20, { volume: 0.08 });\n});\n\n// --- voice commands --------------------------------------------------------\n\n// speech recognition often hears \"red\" as \"read\"\nconst MISHEARD = { red: [\"read\"], green: [], blue: [] };\n\nfor (const name of Object.keys(COLORS)) {\n  voice.intent(name, {\n    examples: [name, ...MISHEARD[name], `paint ${name}`, `use ${name}`, `switch to ${name}`, `make it ${name}`],\n    interim: false,\n    onMatch: () => {\n      color = name;\n      erasing = false;\n      speak(name, { interrupt: true });\n    },\n  });\n}\n\nvoice.intent(\"erase\", {\n  examples: [\"erase\", \"remove\", \"eraser\", \"delete colour\", \"rubber\"],\n  interim: false,\n  onMatch: () => {\n    erasing = true;\n    speak(\"Erase\", { interrupt: true });\n  },\n});\n\nvoice.intent(\"status\", {\n  examples: [\"which colour\", \"what colour is it\", \"which mode\", \"what am I painting\"],\n  interim: false,\n  onMatch: () => speak(erasing ? \"Erasing\" : `Painting ${color}`, { interrupt: true }),\n});\n",
+      "spawn": {
+        "me": {
+          "x": 155,
+          "y": 128
+        },
+        "it": {
+          "x": 205,
+          "y": 78
+        }
+      },
+      "objects": [
+        {
+          "id": "w1",
+          "type": "wall",
+          "name": "Frame",
+          "points": [
+            {
+              "x": 140,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 143
+            },
+            {
+              "x": 140,
+              "y": 143
+            }
+          ],
+          "closed": true,
+          "handles": "both"
+        }
+      ]
+    },
+    {
+      "id": "l2",
+      "name": "Trace",
+      "view": "square",
+      "intro": "Trace. Paint, then say show red to feel it.",
+      "script": "// Level \"Trace\": the canvas of level 1, plus It can show you what you painted.\n// Say \"show red\" (or green, blue): It moves through every red cell, a tone at each,\n// starting with the one closest to it. Hold It lightly to feel the shape.\n// \"Stop\" ends the tour early. Painting pauses while It is moving.\n\nconst N = 8, CELL = 10, X0 = 140, Y0 = 63;\nconst PEN_UP_DISTANCE = 1.5 * CELL;\nconst COLORS = {\n  red:   { fill: \"#e63946\", tone: 330 },\n  green: { fill: \"#2a9d4b\", tone: 523 },\n  blue:  { fill: \"#2f6fdf\", tone: 784 },\n};\n\nconst pixels = new Array(N * N).fill(null); // colour name per cell, null = empty\nconst marks = new Array(N * N).fill(null);  // the coloured square in the preview\nlet color = \"red\";\nlet erasing = false;\nlet penDown = false;\nlet tracing = false; // It is moved by the program\n\n/** Cell index under a point, or -1 outside the canvas. */\nfunction cellAt(p) {\n  const col = Math.floor((p.x - X0) / CELL), row = Math.floor((p.y - Y0) / CELL);\n  return col >= 0 && col < N && row >= 0 && row < N ? row * N + col : -1;\n}\n\nfunction setPixel(i, value) {\n  if (i < 0 || pixels[i] === value) return;\n  pixels[i] = value;\n  marks[i]?.remove();\n  marks[i] = null;\n  if (value) {\n    const x = X0 + ((i % N) + 0.5) * CELL, y = Y0 + (Math.floor(i / N) + 0.5) * CELL;\n    marks[i] = panto.entity({ x, y, r: CELL / 2, color: COLORS[value].fill });\n    sound.beep(COLORS[value].tone, 70, { volume: 0.15 });\n  } else {\n    sound.tick();\n  }\n}\n\nasync function chirp(from, to) {\n  await sound.beep(from, 50, { volume: 0.15 });\n  sound.beep(to, 70, { volume: 0.15 });\n}\n\nfunction updatePen() {\n  if (tracing) return;\n  const meCell = cellAt(me.position);\n  if (!penDown && meCell >= 0 && meCell === cellAt(it.position)) {\n    penDown = true;\n    chirp(500, 800);\n  } else if (penDown && (meCell < 0 || distance(me, it) > PEN_UP_DISTANCE)) {\n    penDown = false;\n    chirp(800, 500);\n  }\n  if (penDown) setPixel(meCell, erasing ? null : color);\n}\n\n// It reads: every new cell says its colour, a tick means empty\nlet itCell = -1;\nit.onMove((p) => {\n  if (tracing) return;\n  updatePen();\n  const i = cellAt(p);\n  if (i === itCell) return;\n  itCell = i;\n  if (i < 0 || penDown) return;\n  if (pixels[i]) speak(pixels[i], { interrupt: true });\n  else sound.tick();\n});\n\n// Me draws: a quiet low click at each cell border while the pen is up\nlet meCell = -1;\nme.onMove((p) => {\n  updatePen();\n  const i = cellAt(p);\n  if (i === meCell) return;\n  meCell = i;\n  if (i >= 0 && !penDown) sound.beep(180, 20, { volume: 0.08 });\n});\n\n// --- voice commands --------------------------------------------------------\n\n// speech recognition often hears \"red\" as \"read\"\nconst MISHEARD = { red: [\"read\"], green: [], blue: [] };\n\nfor (const name of Object.keys(COLORS)) {\n  voice.intent(name, {\n    examples: [name, ...MISHEARD[name], `paint ${name}`, `use ${name}`, `switch to ${name}`, `make it ${name}`],\n    interim: false,\n    onMatch: () => {\n      color = name;\n      erasing = false;\n      speak(name, { interrupt: true });\n    },\n  });\n}\n\nvoice.intent(\"erase\", {\n  examples: [\"erase\", \"remove\", \"eraser\", \"delete colour\", \"rubber\"],\n  interim: false,\n  onMatch: () => {\n    erasing = true;\n    speak(\"Erase\", { interrupt: true });\n  },\n});\n\nvoice.intent(\"status\", {\n  examples: [\"which colour\", \"what colour is it\", \"which mode\", \"what am I painting\"],\n  interim: false,\n  onMatch: () => speak(erasing ? \"Erasing\" : `Painting ${color}`, { interrupt: true }),\n});\n\n// --- It traces a colour ----------------------------------------------------\n\nconst centerOf = (i) => ({ x: X0 + ((i % N) + 0.5) * CELL, y: Y0 + (Math.floor(i / N) + 0.5) * CELL });\n\n/** The cells of a colour in tour order: always the nearest cell next. */\nfunction tour(name) {\n  const left = pixels.map((v, i) => (v === name ? i : -1)).filter((i) => i >= 0);\n  const order = [];\n  let from = it.position;\n  while (left.length) {\n    let best = 0;\n    left.forEach((i, k) => { if (distance(from, centerOf(i)) < distance(from, centerOf(left[best]))) best = k; });\n    const [i] = left.splice(best, 1);\n    order.push(i);\n    from = centerOf(i);\n  }\n  return order;\n}\n\nlet stopTour = false;\n\nasync function show(name) {\n  if (tracing) return;\n  const cells = tour(name);\n  if (!cells.length) return speak(`Nothing is ${name}.`, { interrupt: true });\n  tracing = true;\n  stopTour = false;\n  penDown = false;\n  await speak(`${cells.length} ${name}`, { interrupt: true });\n  for (const i of cells) {\n    if (stopTour) break;\n    await it.moveTo(centerOf(i), { hold: true });\n    sound.beep(COLORS[name].tone, 120, { volume: 0.15 });\n    await wait(250);\n  }\n  it.free();\n  tracing = false;\n  sound.beep(500, 70, { volume: 0.15 });\n}\n\nfor (const name of Object.keys(COLORS)) {\n  voice.intent(`show_${name}`, {\n    examples: [`show ${name}`, `show me ${name}`, `where is ${name}`, `trace ${name}`],\n    interim: false,\n    onMatch: () => show(name),\n  });\n}\n\nvoice.intent(\"stop\", {\n  examples: [\"stop\", \"enough\", \"cancel\"],\n  interim: false,\n  onMatch: () => { stopTour = true; },\n});\n",
+      "spawn": {
+        "me": {
+          "x": 155,
+          "y": 128
+        },
+        "it": {
+          "x": 205,
+          "y": 78
+        }
+      },
+      "objects": [
+        {
+          "id": "w1",
+          "type": "wall",
+          "name": "Frame",
+          "points": [
+            {
+              "x": 140,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 143
+            },
+            {
+              "x": 140,
+              "y": 143
+            }
+          ],
+          "closed": true,
+          "handles": "both"
+        }
+      ]
+    },
+    {
+      "id": "l3",
+      "name": "Fine canvas",
+      "view": "square",
+      "intro": "Fine canvas. Smaller cells.",
+      "script": "// Level \"Fine canvas\": like \"Canvas\", but 16 × 16 cells of 5 mm – twice the resolution.\n// Pen down when Me and It are in the same cell; it stays down until they are more\n// than 1.5 cells apart, so a small drift of one hand does not break the line.\n\nconst N = 16, CELL = 5, X0 = 140, Y0 = 63;\nconst PEN_UP_DISTANCE = 1.5 * CELL;\nconst COLORS = {\n  red:   { fill: \"#e63946\", tone: 330 },\n  green: { fill: \"#2a9d4b\", tone: 523 },\n  blue:  { fill: \"#2f6fdf\", tone: 784 },\n};\n\nconst pixels = new Array(N * N).fill(null); // colour name per cell, null = empty\nconst marks = new Array(N * N).fill(null);  // the coloured square in the preview\nlet color = \"red\";\nlet erasing = false;\nlet penDown = false;\n\n/** Cell index under a point, or -1 outside the canvas. */\nfunction cellAt(p) {\n  const col = Math.floor((p.x - X0) / CELL), row = Math.floor((p.y - Y0) / CELL);\n  return col >= 0 && col < N && row >= 0 && row < N ? row * N + col : -1;\n}\n\nfunction setPixel(i, value) {\n  if (i < 0 || pixels[i] === value) return;\n  pixels[i] = value;\n  marks[i]?.remove();\n  marks[i] = null;\n  if (value) {\n    const x = X0 + ((i % N) + 0.5) * CELL, y = Y0 + (Math.floor(i / N) + 0.5) * CELL;\n    marks[i] = panto.entity({ x, y, r: CELL / 2, color: COLORS[value].fill });\n    sound.beep(COLORS[value].tone, 70, { volume: 0.15 });\n  } else {\n    sound.tick();\n  }\n}\n\nasync function chirp(from, to) {\n  await sound.beep(from, 50, { volume: 0.15 });\n  sound.beep(to, 70, { volume: 0.15 });\n}\n\nfunction updatePen() {\n  const meCell = cellAt(me.position);\n  if (!penDown && meCell >= 0 && meCell === cellAt(it.position)) {\n    penDown = true;\n    chirp(500, 800);\n  } else if (penDown && (meCell < 0 || distance(me, it) > PEN_UP_DISTANCE)) {\n    penDown = false;\n    chirp(800, 500);\n  }\n  if (penDown) setPixel(meCell, erasing ? null : color);\n}\n\n// It reads: every new cell says its colour, a tick means empty\nlet itCell = -1;\nit.onMove((p) => {\n  updatePen();\n  const i = cellAt(p);\n  if (i === itCell) return;\n  itCell = i;\n  if (i < 0 || penDown) return;\n  if (pixels[i]) speak(pixels[i], { interrupt: true });\n  else sound.tick();\n});\n\n// Me draws: a quiet low click at each cell border while the pen is up\nlet meCell = -1;\nme.onMove((p) => {\n  updatePen();\n  const i = cellAt(p);\n  if (i === meCell) return;\n  meCell = i;\n  if (i >= 0 && !penDown) sound.beep(180, 20, { volume: 0.08 });\n});\n\n// --- voice commands --------------------------------------------------------\n\n// speech recognition often hears \"red\" as \"read\"\nconst MISHEARD = { red: [\"read\"], green: [], blue: [] };\n\nfor (const name of Object.keys(COLORS)) {\n  voice.intent(name, {\n    examples: [name, ...MISHEARD[name], `paint ${name}`, `use ${name}`, `switch to ${name}`, `make it ${name}`],\n    interim: false,\n    onMatch: () => {\n      color = name;\n      erasing = false;\n      speak(name, { interrupt: true });\n    },\n  });\n}\n\nvoice.intent(\"erase\", {\n  examples: [\"erase\", \"remove\", \"eraser\", \"delete colour\", \"rubber\"],\n  interim: false,\n  onMatch: () => {\n    erasing = true;\n    speak(\"Erase\", { interrupt: true });\n  },\n});\n\nvoice.intent(\"status\", {\n  examples: [\"which colour\", \"what colour is it\", \"which mode\", \"what am I painting\"],\n  interim: false,\n  onMatch: () => speak(erasing ? \"Erasing\" : `Painting ${color}`, { interrupt: true }),\n});\n",
+      "spawn": {
+        "me": {
+          "x": 152.5,
+          "y": 130.5
+        },
+        "it": {
+          "x": 207.5,
+          "y": 75.5
+        }
+      },
+      "objects": [
+        {
+          "id": "w1",
+          "type": "wall",
+          "name": "Frame",
+          "points": [
+            {
+              "x": 140,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 143
+            },
+            {
+              "x": 140,
+              "y": 143
+            }
+          ],
+          "closed": true,
+          "handles": "both"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "lang": "en-US"
+  }
+}
