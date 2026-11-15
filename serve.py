@@ -9,7 +9,6 @@ Otherwise Chrome likes to serve the old version from its cache after a change.
 """
 
 import http.server
-import socketserver
 import sys
 import webbrowser
 
@@ -28,8 +27,9 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("127.0.0.1", PORT), NoCacheHandler) as httpd:
+    # one thread per connection: a browser that keeps a connection open cannot block the rest
+    http.server.ThreadingHTTPServer.daemon_threads = True
+    with http.server.ThreadingHTTPServer(("127.0.0.1", PORT), NoCacheHandler) as httpd:
         url = f"http://localhost:{PORT}/"
         print(f"DualPanto Studio is running at {url}  (Ctrl+C to stop)")
         try:
