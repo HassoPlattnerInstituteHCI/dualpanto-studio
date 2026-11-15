@@ -294,9 +294,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .field textarea { resize: vertical; }
 .props .check { display: flex; margin-bottom: 10px; font-size: 13px; }
 .range-row { display: flex; align-items: center; gap: 8px; }
-.range-row input { flex: 1; accent-color: var(--accent); }
+.range-row input { flex: 1; min-width: 0; accent-color: var(--accent); }
 .range-row output { font: 12px var(--font-mono); min-width: 44px; text-align: right; }
-.spawn-row { font: 12px var(--font-mono); }
+.spawn-row { font: 12px var(--font-mono); display: inline-flex; align-items: center; gap: 4px; }
+.props-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.props-head h3 { margin: 0; }
+.props-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; align-items: center; margin-bottom: 10px; }
+.props-grid input[type='text'], .props-grid textarea, .props-grid select {
+  width: 100%; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-2); font: inherit;
+}
+.props-grid textarea { resize: none; field-sizing: content; min-height: 0; max-height: 6lh; }
+.props-grid .check { margin: 0; font-size: 12.5px; }
+.props-grid > .field-label { line-height: 1.2; }
+.props-value { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.props-value > * { flex: 1 1 auto; min-width: 0; }
+.props-value > .check, .props-value > .spawn-row { flex: 0 0 auto; }
 .snippet { margin-top: 14px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .snippet-actions { display: inline-flex; gap: 10px; }
 .snippet-head { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; font-size: 12px; font-weight: 600; background: var(--panel-2); border-bottom: 1px solid var(--border); }

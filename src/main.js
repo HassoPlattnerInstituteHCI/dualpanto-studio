@@ -166,12 +166,6 @@ function saveNow() {
 /** Shows where the project is stored and whether everything is written. */
 function renderSaveState(mode) {
   const el = $('#save-state');
-  const hint = $('#storage-hint');
-  if (hint) {
-    hint.textContent = app.folder
-      ? `This project lives in the folder "${app.folder.name}". Changes are saved there.`
-      : 'Everything is saved in the browser automatically. Under "Projects" you can export a file.';
-  }
   if (!app.folder) {
     el.dataset.state = '';
     el.textContent = mode === 'saving' ? 'Saving …' : 'Saved in browser';
@@ -1014,8 +1008,9 @@ async function syncAssetList() {
 // ---------------------------------------------------------------------------
 // level properties panel
 
-function field(label, input, hint) {
-  return h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), input, hint ? h('span', { class: 'field-hint' }, hint) : null);
+/** One label/value row of the compact properties grid; the hint shows on hover. */
+function propRow(label, value, hint) {
+  return [h('span', { class: 'field-label', title: hint ?? '' }, label), h('div', { class: 'props-value', title: hint ?? '' }, value)];
 }
 
 function renameInScript(oldName, newName) {
@@ -1102,7 +1097,7 @@ function renderProps(obj) {
       $('#center-title').textContent = `Level: ${v}`;
       showCode();
     });
-    const intro = h('textarea', { rows: 3, placeholder: 'e.g. "Level 1. Find the exit."' });
+    const intro = h('textarea', { rows: 1, placeholder: 'e.g. "Level 1. Find the exit."' }); // grows with its text
     intro.value = level.intro ?? '';
     intro.addEventListener('input', () => {
       level.intro = intro.value;
@@ -1116,19 +1111,21 @@ function renderProps(obj) {
       renderSidebar();
     });
     const sp = level.spawn ?? {};
-    const spawnInfo = (k) =>
+    const spawnInfo = (k, label) =>
       sp[k]
-        ? h('span', { class: 'spawn-row' }, `${Math.round(sp[k].x)}, ${Math.round(sp[k].y)} mm `,
-          h('button', { class: 'link-btn', onclick: () => { ed.snapshot(); delete level.spawn[k]; ed.changed(); renderProps(null); } }, 'remove'))
-        : h('span', { class: 'muted' }, 'not set – tool "Start ' + (k === 'me' ? 'Me' : 'It') + '"');
+        ? h('span', { class: 'spawn-row' }, `${label} ${Math.round(sp[k].x)}, ${Math.round(sp[k].y)}`,
+          h('button', { class: 'link-btn', title: `Remove the start of ${label}`, 'aria-label': `Remove the start of ${label}`,
+            onclick: () => { ed.snapshot(); delete level.spawn[k]; ed.changed(); renderProps(null); } }, '×'))
+        : h('span', { class: 'spawn-row muted', title: `Set it with the tool "Start ${label}"` }, `${label} –`);
     panel.append(
-      h('h3', {}, 'Level'),
-      field('Name', name, 'Use this name to load the level in the script.'),
-      field('Say on load', intro),
-      h('label', { class: 'check' }, start, 'Load when the program starts'),
-      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Start Me'), spawnInfo('me')),
-      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Start It'), spawnInfo('it')),
-      h('button', { class: 'btn btn-secondary full', onclick: () => run({ startLevel: level.name }) }, '▶ Test this level'),
+      h('div', { class: 'props-head' },
+        h('h3', {}, 'Level'),
+        h('button', { class: 'btn btn-secondary btn-sm', onclick: () => run({ startLevel: level.name }) }, '▶ Test')),
+      h('div', { class: 'props-grid' },
+        ...propRow('Name', name),
+        ...propRow('Says', intro),
+        ...propRow('Start', [spawnInfo('me', 'Me'), spawnInfo('it', 'It')]),
+        ...propRow('', h('label', { class: 'check' }, start, 'Load first'))),
       h('p', { class: 'muted small' }, `${level.objects.length} objects. Select an object to edit it.`)
     );
     return;
@@ -1154,12 +1151,17 @@ function renderProps(obj) {
     }
     before = nameIn.value;
   });
-  panel.append(h('h3', {}, typeLabel), field('Name', nameIn, 'The script finds the object by this name.'));
+  panel.append(h('div', { class: 'props-head' },
+    h('h3', {}, typeLabel),
+    h('button', { class: 'btn btn-danger btn-sm', onclick: () => ed.deleteSelected() }, 'Delete')));
+  const grid = h('div', { class: 'props-grid' });
+  panel.append(grid);
+  grid.append(...propRow('Name', nameIn, 'The script finds the object by this name.'));
 
   const check = (label, key, hint, def = false) => {
     const c = h('input', { type: 'checkbox', checked: obj[key] ?? def });
     c.addEventListener('change', () => ed.update(obj, { [key]: c.checked }));
-    return h('label', { class: 'check', title: hint ?? '' }, c, label);
+    return propRow('', h('label', { class: 'check' }, c, label), hint);
   };
   const range = (label, key, { min, max, step = 1, unit = ' mm', hint, initial } = {}) => {
     const value = obj[key] ?? initial ?? min;
@@ -1170,12 +1172,12 @@ function renderProps(obj) {
       out.textContent = `${r.value}${unit}`;
       ed.update(obj, { [key]: +r.value }, { history: false });
     });
-    return field(label, h('div', { class: 'range-row' }, r, out), hint);
+    return propRow(label, h('div', { class: 'range-row' }, r, out), hint);
   };
   const select = (label, key, options, def) => {
     const s = h('select', {}, options.map(([v, l]) => h('option', { value: v, selected: (obj[key] ?? def) === v }, l)));
     s.addEventListener('change', () => ed.update(obj, { [key]: s.value }));
-    return field(label, s);
+    return propRow(label, s);
   };
   const ballBounce = () => {
     const balls = app.levelEditor?.level?.objects?.filter((o) => o.type === 'entity' && o.kind === 'ball' && o.id !== obj.id) ?? [];
@@ -1185,30 +1187,23 @@ function renderProps(obj) {
       ed.update(obj, { bounceBall: s.value });
       renderProps(obj);
     });
-    return field('Bounced off by ball', s);
+    return propRow('Ball', s, 'The ball that bounces off this object');
   };
 
   if (obj.type === 'wall') {
-    panel.append(
-      check('Closed shape', 'closed'),
-      check('Passable (can be pushed through)', 'passable'),
-      check('Active on start', 'enabled', null, true),
-      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
-      ballBounce()
+    grid.append(
+      ...select('Handles', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
+      ...ballBounce(),
+      ...check('Closed shape', 'closed'),
+      ...check('Passable', 'passable', 'Can be pushed through'),
+      ...check('Active on start', 'enabled', null, true)
     );
   } else if (obj.type === 'rail') {
-    const r = h('input', { type: 'range', min: 2, max: 20, step: 1, value: obj.strength ?? 6 });
-    const out = h('output', {}, `${obj.strength ?? 6} mm`);
-    r.addEventListener('pointerdown', () => ed.snapshot());
-    r.addEventListener('input', () => {
-      out.textContent = `${r.value} mm`;
-      ed.update(obj, { strength: +r.value }, { history: false });
-    });
-    panel.append(
-      field('Strength (capture width)', h('div', { class: 'range-row' }, r, out), 'How far you have to move away from the rail to leave it.'),
-      check('Active on start', 'enabled', null, true),
-      select('Applies to', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
-      ballBounce()
+    grid.append(
+      ...range('Strength', 'strength', { min: 2, max: 20, initial: 6, hint: 'Capture width: how far you have to move away from the rail to leave it.' }),
+      ...select('Handles', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
+      ...ballBounce(),
+      ...check('Active on start', 'enabled', null, true)
     );
   } else if (obj.type === 'entity') {
     const kindSel = h('select', {}, [['enemy', 'Enemy'], ['item', 'Item'], ['marker', 'Marker'], ['ball', 'Ball']]
@@ -1227,7 +1222,7 @@ function renderProps(obj) {
       ed.update(obj, patch);
       renderProps(obj); // other kind, other options
     });
-    const say = h('textarea', { rows: 2, placeholder: obj.kind === 'item' ? 'e.g. "Coin!"' : 'e.g. "Ouch!"' });
+    const say = h('textarea', { rows: 1, placeholder: obj.kind === 'item' ? 'e.g. "Coin!"' : 'e.g. "Ouch!"' });
     say.value = obj.speak ?? '';
     say.addEventListener('focus', () => ed.snapshot());
     say.addEventListener('input', () => ed.update(obj, { speak: say.value }, { history: false }));
@@ -1239,46 +1234,50 @@ function renderProps(obj) {
     sndSel.addEventListener('change', () => ed.update(obj, { sound: sndSel.value }));
     // Native Element.append() stringifies null into visible "null" text, so
     // discard controls that do not apply to this entity kind.
-    panel.append(...[
-      field('Kind', kindSel, 'Enemies and items react to handle touch. Ball is moved by the runtime physics engine.'),
-      range(obj.kind === 'ball' ? 'Radius' : 'Radius (touch)', 'r', { min: 4, max: 40, hint: obj.kind === 'ball' ? 'The ball size used by physics collisions.' : 'How close the handle has to get for onTouch to fire.' }),
-      obj.kind !== 'ball' ? field('Say on touch', say) : null,
-      obj.kind !== 'ball' ? field('Play on touch', sndSel, sounds.length ? null : 'Add sounds in the Sounds tab.') : null,
-      obj.kind !== 'ball' ? check('Tangible: round wall on the device', 'solid', 'Unchecked, the object is only visible and reacts to touch. Checked, the runtime creates a round wall; moving objects are only re-sent when they stop.') : null,
-      obj.kind === 'item' ? check('Disappears when collected', 'vanish', null, true) : null,
-      obj.kind !== 'ball' ? select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me') : null,
+    const isBall = obj.kind === 'ball';
+    const bounces = obj.kind !== 'ball' && obj.bounceBall;
+    const handleChecks = ['me', 'it'].map((handle) => {
+      const input = h('input', { type: 'checkbox', checked: (obj.bounceHandles ?? []).includes(handle) });
+      input.addEventListener('change', () => {
+        const values = new Set(obj.bounceHandles ?? []);
+        if (input.checked) values.add(handle); else values.delete(handle);
+        ed.update(obj, { bounceHandles: [...values] });
+      });
+      return h('label', { class: 'check' }, input, handle === 'me' ? 'Me' : 'It');
+    });
+    const rows = [
+      propRow('Kind', kindSel, 'Enemies and items react to handle touch. Ball is moved by the runtime physics engine.'),
+      range('Radius', 'r', { min: 4, max: 40, hint: isBall ? 'The ball size used by physics collisions.' : 'How close the handle has to get for onTouch to fire.' }),
+      !isBall && propRow('Says', say, 'Spoken on touch'),
+      !isBall && propRow('Sound', sndSel, sounds.length ? 'Played on touch' : 'Add sounds in the Sounds tab.'),
+      !isBall && select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
       ballBounce(),
-      obj.kind !== 'ball' && obj.bounceBall ? range('Bounce width', 'bounceWidth', { min: 1, max: 40, initial: obj.r ?? 10 }) : null,
-      obj.kind !== 'ball' && obj.bounceBall ? range('Bounce depth', 'bounceDepth', { min: 1, max: 20, initial: obj.r ?? 10 }) : null,
-      obj.kind === 'ball' ? range('Speed', 'speed', { min: 1, max: 100, unit: ' mm/s' }) : null,
-      obj.kind === 'ball' ? range('Launch angle', 'angle', { min: 0, max: 6.28, step: 0.05, unit: ' rad' }) : null,
-      obj.kind === 'ball' ? range('Serve spread', 'serveAngle', { min: 0, max: 1.5, step: 0.05, unit: ' rad' }) : null,
-      obj.kind === 'ball' ? range('Speed increase per bounce', 'bounceSpeedup', { min: 1, max: 1.5, step: 0.01, unit: '×' }) : null,
-      obj.kind === 'ball' ? range('Paddle bounce angle', 'bounceAngle', { min: 0, max: 1.5, step: 0.05, unit: ' rad' }) : null,
-      obj.kind === 'ball' ? range('Handle bounce width', 'handleBounceWidth', { min: 1, max: 40 }) : null,
-      obj.kind === 'ball' ? range('Handle bounce depth', 'handleBounceDepth', { min: 1, max: 20 }) : null,
-      obj.kind === 'ball' ? check('Moving on start', 'moving', 'Start this ball immediately when the level loads.') : null,
-      obj.kind === 'ball' ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Bounces off handles'), ...['me', 'it'].map((handle) => {
-        const input = h('input', { type: 'checkbox', checked: (obj.bounceHandles ?? []).includes(handle) });
-        input.addEventListener('change', () => {
-          const values = new Set(obj.bounceHandles ?? []);
-          if (input.checked) values.add(handle); else values.delete(handle);
-          ed.update(obj, { bounceHandles: [...values] });
-        });
-        return h('label', { class: 'check' }, input, handle === 'me' ? 'Me handle' : 'It handle');
-      })) : null,
-      check('Visible on start', 'enabled', null, true)
-    ].filter((child) => child != null));
+      bounces && range('Bounce w', 'bounceWidth', { min: 1, max: 40, initial: obj.r ?? 10, hint: 'Bounce width' }),
+      bounces && range('Bounce d', 'bounceDepth', { min: 1, max: 20, initial: obj.r ?? 10, hint: 'Bounce depth' }),
+      isBall && range('Speed', 'speed', { min: 1, max: 100, unit: ' mm/s' }),
+      isBall && range('Launch', 'angle', { min: 0, max: 6.28, step: 0.05, unit: ' rad', hint: 'Launch angle' }),
+      isBall && range('Spread', 'serveAngle', { min: 0, max: 1.5, step: 0.05, unit: ' rad', hint: 'Serve spread' }),
+      isBall && range('Speedup', 'bounceSpeedup', { min: 1, max: 1.5, step: 0.01, unit: '×', hint: 'Speed increase per bounce' }),
+      isBall && range('Paddle', 'bounceAngle', { min: 0, max: 1.5, step: 0.05, unit: ' rad', hint: 'Paddle bounce angle' }),
+      isBall && range('Hit width', 'handleBounceWidth', { min: 1, max: 40, hint: 'Handle bounce width' }),
+      isBall && range('Hit depth', 'handleBounceDepth', { min: 1, max: 20, hint: 'Handle bounce depth' }),
+      isBall && propRow('Bounces', handleChecks, 'Bounces off these handles'),
+      !isBall && check('Tangible', 'solid', 'Unchecked, the object is only visible and reacts to touch. Checked, the runtime creates a round wall; moving objects are only re-sent when they stop.'),
+      obj.kind === 'item' && check('Disappears when collected', 'vanish', null, true),
+      isBall && check('Moving on start', 'moving', 'Start this ball immediately when the level loads.'),
+      check('Visible on start', 'enabled', null, true),
+    ];
+    grid.append(...rows.filter(Boolean).flat());
   } else if (obj.type === 'zone') {
-    const say = h('textarea', { rows: 2, placeholder: 'Optional, e.g. "You reached the goal."' });
+    const say = h('textarea', { rows: 1, placeholder: 'Optional, e.g. "You reached the goal."' });
     say.value = obj.speak ?? '';
     say.addEventListener('focus', () => ed.snapshot());
     say.addEventListener('input', () => ed.update(obj, { speak: say.value }, { history: false }));
-    panel.append(
-      field('Say on enter', say),
-      select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
-      ballBounce(),
-      check('Active on start', 'enabled', null, true)
+    grid.append(
+      ...propRow('Says', say, 'Spoken on enter'),
+      ...select('Reacts to', 'handle', [['me', 'Me handle'], ['it', 'It handle'], ['both', 'Both']], 'me'),
+      ...ballBounce(),
+      ...check('Active on start', 'enabled', null, true)
     );
   }
 
@@ -1298,8 +1297,7 @@ function renderProps(obj) {
               setTimeout(() => (e.target.textContent = 'Copy'), 1200);
             },
           }, 'Copy'))),
-      h('pre', {}, snippet)),
-    h('button', { class: 'btn btn-danger full', onclick: () => ed.deleteSelected() }, 'Delete object')
+      h('pre', {}, snippet))
   );
 }
 
