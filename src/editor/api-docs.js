@@ -48,6 +48,9 @@ interface PantoHandle {
   /** Only stops following; the handle stays where it is. */
   stopFollow(): this;
   readonly isFollowing: boolean;
+  /** The haptic graph this handle is on, or null. */
+  readonly graph: PantoGraph | null;
+  readonly onGraph: boolean;
   /** Point the handle is following, or null. */
   readonly followTarget: { x: number; y: number } | null;
   /** Name of the object being followed, or null. */
@@ -63,6 +66,39 @@ interface PantoHandle {
 
 interface PantoObstacle {
   readonly id: number; readonly name: string; readonly type: 'wall' | 'rail'; readonly enabled: boolean;
+  enable(): this; disable(): this; remove(): void;
+}
+
+interface GraphOptions {
+  name?: string; handles?: Handles; enabled?: boolean; persistent?: boolean;
+  /** mm around an entry node where the handle gets caught (default 5). */
+  capture?: number;
+  /** mm around a node where the handle can turn into another edge (default 4). */
+  junction?: number;
+  /** Pulling this many mm off the edge leaves the graph; 0 never (default 15). */
+  breakaway?: number;
+  /** Nodes feel like dips within this many mm along the edges; 0 off (default). */
+  sinkRadius?: number;
+  /** Strength of the dips in mm; negative makes bumps (default 1.5). */
+  sinkDepth?: number;
+  /** PID gains of the groove; leave out for the gains of the walls. */
+  p?: number; i?: number; d?: number;
+}
+
+/** Haptic graph: grooves without width along the edges. The handle enters at an entry node. */
+interface PantoGraph {
+  readonly id: number; readonly name: string; readonly type: 'graph'; readonly enabled: boolean;
+  readonly nodes: { x: number; y: number; entry: boolean }[];
+  /** Node index pairs. */
+  readonly edges: [number, number][];
+  /** Called when a handle gets on the graph. */
+  onEnter(fn: (handle: PantoHandle) => void): () => void;
+  /** Called when a handle leaves it (breaking away, disable, remove). */
+  onLeave(fn: (handle: PantoHandle) => void): () => void;
+  isOn(handle?: 'me' | 'it'): boolean;
+  /** Nodes feel like dips (depth > 0) or bumps (depth < 0); radius 0 turns them off. */
+  setSinks(radius: number, depth?: number): this;
+  nearestNode(p: Point | PantoHandle): { index: number; x: number; y: number; distance: number };
   enable(): this; disable(): this; remove(): void;
 }
 
@@ -226,6 +262,12 @@ declare const panto: {
   circle(x: number, y: number, r: number, options?: ObjectOptions & { passable?: boolean; corners?: number }): PantoObstacle;
   /** Haptic rail ("hallway"). strength = capture width in mm. */
   rail(points: Point[], options?: ObjectOptions & { strength?: number }): PantoObstacle;
+  /**
+   * Haptic graph: nodes connected by edges (node index pairs) that feel like grooves.
+   * Without edges, the nodes are connected in order. Nodes are entries unless { entry: false }.
+   */
+  graph(nodes: (Point | { x: number; y: number; entry?: boolean })[], edges?: [number, number][], options?: GraphOptions): PantoGraph;
+  graph(nodes: (Point | { x: number; y: number; entry?: boolean })[], options?: GraphOptions): PantoGraph;
   /** Invisible area that reacts when a handle enters it. */
   zone(shape: { x: number; y: number; w: number; h: number } | { x: number; y: number; r: number } | Point[],
        options?: { name?: string; speak?: string; handle?: 'me' | 'it' | 'both'; bounceBall?: string; persistent?: boolean }): PantoZone;
@@ -246,7 +288,7 @@ declare const panto: {
   /** Object of the scene by its name – also works in the main script, where there is no "level". */
   find(name: string): PantoObstacle | PantoZone | PantoEntity | null;
   /** All objects of the scene, optionally by type. */
-  objects(type?: 'wall' | 'rail' | 'zone' | 'entity'): Array<PantoObstacle | PantoZone | PantoEntity>;
+  objects(type?: 'wall' | 'rail' | 'graph' | 'zone' | 'entity'): Array<PantoObstacle | PantoZone | PantoEntity>;
   loadLevel(name: string): Promise<PantoLevel | null>;
   nextLevel(): Promise<PantoLevel | null>;
   /** A level in code only – without an entry in the level editor. */
@@ -464,6 +506,15 @@ panto.find("Foe");         // also works in the main script, where there is no "
 panto.objects("wall");     // all walls of the scene`)}
   <p><b>Cleanup</b> happens automatically and depends on <i>where</i> something is created: in a <b>level script</b> it belongs to the level and disappears when the level changes; in the <b>main script</b> it stays across levels. <code>{ persistent: true }</code> makes an object from a level script permanent too. On stop, everything is removed.</p>
   <p><code>handles: "me"</code> or <code>"it"</code> makes an obstacle apply to one handle only.</p>
+  <p><b>Haptic graphs</b> are networks of grooves without width – the paths of a maze, a map, a menu tree. The handle gets on at an <b>entry node</b> (within <code>capture</code> mm), can then only slide along the edges and turns at the nodes. Pulling harder than <code>breakaway</code> mm off the path leaves it. Draw them with the <b>Graph</b> tool or create them in code:</p>
+  ${code(`// nodes, then edges as node index pairs: a T junction
+const maze = panto.graph([[150, 150], [210, 150], [270, 150], [210, 90]],
+                         [[0, 1], [1, 2], [1, 3]], { name: "Maze", sinkRadius: 8 });
+maze.onEnter((handle) => speak("On the path"));
+maze.onLeave(() => speak("Off the path"));
+panto.graph([[100, 60], [160, 60], [160, 120]]);   // without edges: a path
+me.onGraph;   me.graph;   maze.isOn("me");   maze.setSinks(0);   // sinks off`)}
+  <p>Graphs need firmware with <b>protocol revision 7</b> (dualpantoframework, branch <code>feature/haptic-graph-sinks</code>); the emulator has them always. The device does the walking itself, so moving along a graph costs no packets. Uploading one costs one packet per 8 nodes and per 20 edges. In the emulator, the filled circle (what the person feels) stays on the graph while you drag; sinks are only felt on the device.</p>
   <p><b>On the real device, every obstacle costs packets:</b> a wall is one CREATE, one packet per point and one ENABLE, with 10&nbsp;ms between two such packets. A line with 2 points takes about 40&nbsp;ms, a <code>panto.circle</code> with 16 corners almost 200&nbsp;ms. For something that changes often it is better to <b>create obstacles once and just enable and disable them</b> (one packet each) instead of creating them over and over. Zones and entities cost nothing – the Studio computes them itself.</p>
 </section>
 <section>

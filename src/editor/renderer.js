@@ -16,6 +16,7 @@ export function palette() {
     wall: cssVar('--c-wall', '#2b2b2b'),
     passable: cssVar('--c-passable', '#8a8a8a'),
     rail: cssVar('--c-rail', '#1f7a6d'),
+    graph: cssVar('--c-graph', '#b8327f'),
     zone: cssVar('--c-zone', '#3a6fd8'),
     enemy: cssVar('--c-enemy', '#d23f3f'),
     item: cssVar('--c-item', '#2f9e44'),
@@ -124,6 +125,7 @@ export function drawWorld(ctx, view, scene, opts = {}) {
   // zones first (background)
   for (const o of objects) if (o.type === 'zone') drawZone(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'rail') drawRail(ctx, o, c, px, opts);
+  for (const o of objects) if (o.type === 'graph') drawGraph(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'wall') drawWall(ctx, o, c, px, opts);
   for (const o of objects) if (o.type === 'entity') drawEntity(ctx, o, c, px, opts);
 
@@ -306,6 +308,77 @@ function drawRail(ctx, o, c, px, opts) {
   ctx.setLineDash([]);
   if (selected && opts.showVertices) drawVertices(ctx, pts, c.select, px);
   if (o.name && opts.labels !== false && !o.name.startsWith('menu')) label(ctx, o.name, pts[0].x, pts[0].y - px(10), c.rail, px);
+  ctx.globalAlpha = 1;
+}
+
+/** Haptic graph: grooves along the edges, entry nodes with their capture radius. */
+function drawGraph(ctx, o, c, px, opts) {
+  const selected = opts.selectedId != null && opts.selectedId === o.id;
+  const nodes = o.nodes ?? o.points ?? [];
+  const links = o.edges ?? [];
+  const active = o._on && [...o._on.values()].some(Boolean);
+  const base = o.enabled === false ? 0.3 : 1;
+  const color = selected ? c.select : c.graph;
+  const path = () => {
+    ctx.beginPath();
+    for (const [a, b] of links) {
+      if (!nodes[a] || !nodes[b]) continue;
+      ctx.moveTo(nodes[a].x, nodes[a].y);
+      ctx.lineTo(nodes[b].x, nodes[b].y);
+    }
+  };
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // the groove: a soft band, then the line the handle is held on
+  ctx.globalAlpha = base * (active ? 0.3 : 0.16);
+  ctx.strokeStyle = c.graph;
+  ctx.lineWidth = Math.max(4, px(8));
+  path();
+  ctx.stroke();
+  ctx.globalAlpha = base;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = px(selected || active ? 3 : 2);
+  path();
+  ctx.stroke();
+  // sinks: dips around the nodes
+  const sink = +o.sinkRadius || 0;
+  if (sink > 0) {
+    ctx.fillStyle = hexA(c.graph, (+o.sinkDepth || 0) < 0 ? 0.08 : 0.16);
+    for (const n of nodes) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, sink, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // nodes; entry nodes show where the handle gets captured
+  const capture = +(o.capture ?? 5);
+  nodes.forEach((n, i) => {
+    const entry = n.entry !== false;
+    if (entry && capture > 0) {
+      ctx.setLineDash([px(3), px(3)]);
+      ctx.strokeStyle = hexA(c.graph, 0.7);
+      ctx.lineWidth = px(1.25);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, capture, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillStyle = entry ? color : c.area;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = px(1.5);
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, px(selected && opts.showVertices ? 5 : 3.5), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    if (selected && opts.showVertices && opts.graphCursor === i) {
+      ctx.strokeStyle = c.select;
+      ctx.lineWidth = px(2);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, px(9), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  });
+  if (o.name && opts.labels !== false && nodes[0]) label(ctx, o.name, nodes[0].x, nodes[0].y - px(12), c.graph, px);
   ctx.globalAlpha = 1;
 }
 

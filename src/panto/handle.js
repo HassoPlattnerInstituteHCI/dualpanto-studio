@@ -36,6 +36,9 @@ export class Handle {
   get y() { return this._god.y; }
   get rotation() { return this._rot; }
   get isMoving() { return this.inTransition; }
+  /** The haptic graph the handle is on, or null. */
+  get graph() { return this._graph && !this._graph.removed ? this._graph : null; }
+  get onGraph() { return !!this.graph; }
   get isFollowing() { return this._target !== null; }
   get followTarget() { return this._target == null ? null : this._rt._targetPoint(this._target); }
   get followName() { return this._target && typeof this._target === 'object' ? this._target.name || null : null; }

@@ -3,7 +3,7 @@
   "id": "tpl_pacman",
   "name": "Pac-Man",
   "description": "Pac-Man for the DualPanto, built up in levels: corridor, turns, pellets, junctions.",
-  "script": "// Pac-Man for the DualPanto, built up in small steps: every level adds one new thing.\n// You are Pac-Man: the Me handle. Each corridor is made of walls with a rail along its\n// center, so the hand is guided and cannot leave the maze.\n\n// R = start the current level again\nonKey(\"r\", () => panto.loadLevel(panto.level.name));\n",
+  "script": "// Pac-Man for the DualPanto, built up in small steps: every level adds one new thing.\n// You are Pac-Man: the Me handle. The corridors are a haptic graph: the hand slides in a\n// groove, turns at the junctions and settles into dips at the corners and crossings.\n// It needs firmware with protocol revision 7.\n\n// R = start the current level again\nonKey(\"r\", () => panto.loadLevel(panto.level.name));\n",
   "levels": [
     {
       "id": "l1",
@@ -19,45 +19,32 @@
       },
       "objects": [
         {
-          "id": "w1",
-          "type": "wall",
-          "name": "Corridor",
-          "points": [
-            {
-              "x": 140,
-              "y": 96
-            },
-            {
-              "x": 220,
-              "y": 96
-            },
-            {
-              "x": 220,
-              "y": 110
-            },
-            {
-              "x": 140,
-              "y": 110
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
           "id": "r1",
-          "type": "rail",
+          "type": "graph",
           "name": "Path",
           "points": [
             {
               "x": 146,
-              "y": 103
+              "y": 103,
+              "entry": true
             },
             {
               "x": 214,
-              "y": 103
+              "y": 103,
+              "entry": true
             }
           ],
-          "strength": 8,
+          "edges": [
+            [
+              0,
+              1
+            ]
+          ],
+          "capture": 5,
+          "junction": 4,
+          "breakaway": 15,
+          "sinkRadius": 8,
+          "sinkDepth": 1,
           "handles": "me"
         },
         {
@@ -86,69 +73,50 @@
       },
       "objects": [
         {
-          "id": "w2",
-          "type": "wall",
-          "name": "Corridor",
-          "points": [
-            {
-              "x": 140,
-              "y": 64
-            },
-            {
-              "x": 220,
-              "y": 64
-            },
-            {
-              "x": 220,
-              "y": 142
-            },
-            {
-              "x": 154,
-              "y": 142
-            },
-            {
-              "x": 154,
-              "y": 128
-            },
-            {
-              "x": 206,
-              "y": 128
-            },
-            {
-              "x": 206,
-              "y": 78
-            },
-            {
-              "x": 140,
-              "y": 78
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
           "id": "r2",
-          "type": "rail",
+          "type": "graph",
           "name": "Path",
           "points": [
             {
               "x": 146,
-              "y": 71
+              "y": 71,
+              "entry": true
             },
             {
               "x": 213,
-              "y": 71
+              "y": 71,
+              "entry": true
             },
             {
               "x": 213,
-              "y": 135
+              "y": 135,
+              "entry": true
             },
             {
               "x": 160,
-              "y": 135
+              "y": 135,
+              "entry": true
             }
           ],
-          "strength": 8,
+          "edges": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              3
+            ]
+          ],
+          "capture": 5,
+          "junction": 4,
+          "breakaway": 15,
+          "sinkRadius": 8,
+          "sinkDepth": 1,
           "handles": "me"
         },
         {
@@ -197,69 +165,50 @@
       },
       "objects": [
         {
-          "id": "w3",
-          "type": "wall",
-          "name": "Corridor",
-          "points": [
-            {
-              "x": 140,
-              "y": 142
-            },
-            {
-              "x": 140,
-              "y": 64
-            },
-            {
-              "x": 220,
-              "y": 64
-            },
-            {
-              "x": 220,
-              "y": 142
-            },
-            {
-              "x": 206,
-              "y": 142
-            },
-            {
-              "x": 206,
-              "y": 78
-            },
-            {
-              "x": 154,
-              "y": 78
-            },
-            {
-              "x": 154,
-              "y": 142
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
           "id": "r3",
-          "type": "rail",
+          "type": "graph",
           "name": "Path",
           "points": [
             {
               "x": 147,
-              "y": 135
+              "y": 135,
+              "entry": true
             },
             {
               "x": 147,
-              "y": 71
+              "y": 71,
+              "entry": true
             },
             {
               "x": 213,
-              "y": 71
+              "y": 71,
+              "entry": true
             },
             {
               "x": 213,
-              "y": 135
+              "y": 135,
+              "entry": true
             }
           ],
-          "strength": 8,
+          "edges": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              3
+            ]
+          ],
+          "capture": 5,
+          "junction": 4,
+          "breakaway": 15,
+          "sinkRadius": 8,
+          "sinkDepth": 1,
           "handles": "me"
         },
         {
@@ -348,230 +297,111 @@
       },
       "objects": [
         {
-          "id": "w4",
-          "type": "wall",
-          "name": "Outer wall",
-          "points": [
-            {
-              "x": 140,
-              "y": 64
-            },
-            {
-              "x": 220,
-              "y": 64
-            },
-            {
-              "x": 220,
-              "y": 142
-            },
-            {
-              "x": 140,
-              "y": 142
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
-          "id": "w5",
-          "type": "wall",
-          "name": "Block",
-          "points": [
-            {
-              "x": 154,
-              "y": 78
-            },
-            {
-              "x": 173,
-              "y": 78
-            },
-            {
-              "x": 173,
-              "y": 96
-            },
-            {
-              "x": 154,
-              "y": 96
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
-          "id": "w6",
-          "type": "wall",
-          "name": "Block",
-          "points": [
-            {
-              "x": 187,
-              "y": 78
-            },
-            {
-              "x": 206,
-              "y": 78
-            },
-            {
-              "x": 206,
-              "y": 96
-            },
-            {
-              "x": 187,
-              "y": 96
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
-          "id": "w7",
-          "type": "wall",
-          "name": "Block",
-          "points": [
-            {
-              "x": 154,
-              "y": 110
-            },
-            {
-              "x": 173,
-              "y": 110
-            },
-            {
-              "x": 173,
-              "y": 128
-            },
-            {
-              "x": 154,
-              "y": 128
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
-          "id": "w8",
-          "type": "wall",
-          "name": "Block",
-          "points": [
-            {
-              "x": 187,
-              "y": 110
-            },
-            {
-              "x": 206,
-              "y": 110
-            },
-            {
-              "x": 206,
-              "y": 128
-            },
-            {
-              "x": 187,
-              "y": 128
-            }
-          ],
-          "closed": true,
-          "handles": "me"
-        },
-        {
           "id": "r4",
-          "type": "rail",
+          "type": "graph",
           "name": "Path",
           "points": [
             {
               "x": 147,
-              "y": 71
-            },
-            {
-              "x": 213,
-              "y": 71
-            }
-          ],
-          "strength": 8,
-          "handles": "me"
-        },
-        {
-          "id": "r5",
-          "type": "rail",
-          "name": "Path",
-          "points": [
-            {
-              "x": 147,
-              "y": 103
-            },
-            {
-              "x": 213,
-              "y": 103
-            }
-          ],
-          "strength": 8,
-          "handles": "me"
-        },
-        {
-          "id": "r6",
-          "type": "rail",
-          "name": "Path",
-          "points": [
-            {
-              "x": 147,
-              "y": 135
-            },
-            {
-              "x": 213,
-              "y": 135
-            }
-          ],
-          "strength": 8,
-          "handles": "me"
-        },
-        {
-          "id": "r7",
-          "type": "rail",
-          "name": "Path",
-          "points": [
-            {
-              "x": 147,
-              "y": 71
-            },
-            {
-              "x": 147,
-              "y": 135
-            }
-          ],
-          "strength": 8,
-          "handles": "me"
-        },
-        {
-          "id": "r8",
-          "type": "rail",
-          "name": "Path",
-          "points": [
-            {
-              "x": 180,
-              "y": 71
+              "y": 71,
+              "entry": true
             },
             {
               "x": 180,
-              "y": 135
-            }
-          ],
-          "strength": 8,
-          "handles": "me"
-        },
-        {
-          "id": "r9",
-          "type": "rail",
-          "name": "Path",
-          "points": [
-            {
-              "x": 213,
-              "y": 71
+              "y": 71,
+              "entry": true
             },
             {
               "x": 213,
-              "y": 135
+              "y": 71,
+              "entry": true
+            },
+            {
+              "x": 147,
+              "y": 103,
+              "entry": true
+            },
+            {
+              "x": 180,
+              "y": 103,
+              "entry": true
+            },
+            {
+              "x": 213,
+              "y": 103,
+              "entry": true
+            },
+            {
+              "x": 147,
+              "y": 135,
+              "entry": true
+            },
+            {
+              "x": 180,
+              "y": 135,
+              "entry": true
+            },
+            {
+              "x": 213,
+              "y": 135,
+              "entry": true
             }
           ],
-          "strength": 8,
+          "edges": [
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              3
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              5
+            ],
+            [
+              3,
+              4
+            ],
+            [
+              3,
+              6
+            ],
+            [
+              4,
+              5
+            ],
+            [
+              4,
+              7
+            ],
+            [
+              5,
+              8
+            ],
+            [
+              6,
+              7
+            ],
+            [
+              7,
+              8
+            ]
+          ],
+          "capture": 5,
+          "junction": 4,
+          "breakaway": 15,
+          "sinkRadius": 8,
+          "sinkDepth": 1,
           "handles": "me"
         },
         {

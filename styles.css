@@ -20,6 +20,7 @@
   --c-wall: #26262a;
   --c-passable: #8d8a84;
   --c-rail: #16806f;
+  --c-graph: #b8327f;
   --c-zone: #3a6fd8;
   --c-enemy: #cf3b3b;
   --c-item: #2f9e44;
@@ -55,6 +56,7 @@
     --c-wall: #e9e9ec;
     --c-passable: #8f8f96;
     --c-rail: #3cc2ab;
+    --c-graph: #f07ac0;
     --c-zone: #6f9bff;
     --c-enemy: #ff6b6b;
     --c-item: #51cf66;

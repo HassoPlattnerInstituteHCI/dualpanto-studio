@@ -3,8 +3,8 @@
 
 import { Emitter } from './emitter.js';
 import {
-  BAUD_RATE, REVISION, MSG, CONTROL, PANTO_BOTH, TRACKED,
-  PacketParser, build, obstaclePackets, withPacketId, decodePosition, decodeText,
+  BAUD_RATE, REVISION, SUPPORTED_REVISIONS, GRAPH_REVISION, MSG, CONTROL, PANTO_BOTH, TRACKED,
+  PacketParser, build, obstaclePackets, graphPackets, withPacketId, decodePosition, decodeGraphState, decodeText,
 } from './protocol.js';
 import { EMBER_AREAS } from './areas.js';
 
@@ -154,10 +154,11 @@ export class SerialDevice extends Emitter {
     switch (type) {
       case MSG.SYNC: {
         const rev = view.byteLength >= 4 ? view.getUint32(0, false) : -1;
-        if (rev !== REVISION) {
+        if (!SUPPORTED_REVISIONS.includes(rev)) {
           this._log('error', `Protocol revision mismatch: expected ${REVISION}, device reports ${rev}. Update the firmware.`);
           return;
         }
+        this.revision = rev;
         // A SYNC that was still buffered from before the reset would be acknowledged
         // and then the device reboots. Unity waits for the "START" log for the same reason.
         if (this.resetOnConnect && !this.bootSeen && performance.now() - this.openedAt < SYNC_GRACE_MS) return;
@@ -185,6 +186,7 @@ export class SerialDevice extends Emitter {
           this.connectedAt = performance.now();
           this.nextPacketId = 1;
           this._log('info', 'Connected to DualPanto (protocol revision ' + rev + ').');
+          if (rev < GRAPH_REVISION) this._log('warn', `This firmware has no haptic graphs (needs protocol revision ${GRAPH_REVISION}).`);
           this.emit('status', 'connected');
           this.emit('connected');
           this._pump();
@@ -212,6 +214,11 @@ export class SerialDevice extends Emitter {
         if (text.includes('START')) this.bootSeen = true;
         if (text.includes('hearbeat') || text.includes('heartbeat')) return;
         this.emit('log', { level: 'device', text });
+        break;
+      }
+      case MSG.GRAPH_STATE: {
+        if (view.byteLength < 4) break;
+        this.emit('graphState', decodeGraphState(view));
         break;
       }
       case MSG.TRANSITION_ENDED:
@@ -350,6 +357,7 @@ export class SerialDevice extends Emitter {
     else if (type === MSG.ENABLE_OBSTACLE) s.enabled++;
     else if (type === MSG.DISABLE_OBSTACLE) s.disabled++;
     else if (type === MSG.REMOVE_OBSTACLE) s.removed++;
+    else if (type === MSG.CREATE_GRAPH) s.graphs = (s.graphs ?? 0) + 1;
   }
 
   _reportStats() {
@@ -361,6 +369,7 @@ export class SerialDevice extends Emitter {
     if (s.enabled) parts.push(`${s.enabled} enabled`);
     if (s.disabled) parts.push(`${s.disabled} disabled`);
     if (s.removed) parts.push(`${s.removed} removed`);
+    if (s.graphs) parts.push(`${s.graphs} graph${s.graphs > 1 ? 's' : ''} created`);
     if (parts.length) this._log('info', `Obstacles acknowledged: ${parts.join(', ')}.`);
   }
 
@@ -421,6 +430,33 @@ export class SerialDevice extends Emitter {
   freeze(index) {
     this._send(build.freeze(index));
   }
+  // ---- haptic graphs (protocol revision 7) ---------------------------------
+  get supportsGraphs() {
+    return (this.revision ?? REVISION) >= GRAPH_REVISION;
+  }
+  /** graph: { nodes: [{x, y, entry}] (world), edges: [[i, j]], capture, junction, breakaway, sinkRadius, sinkDepth, p, i, d } */
+  createGraph(id, graph, { handles = 'both' } = {}) {
+    if (!this.supportsGraphs) {
+      if (!this._warnedGraphs) this._log('warn', `Haptic graphs need firmware with protocol revision ${GRAPH_REVISION}; the device reports ${this.revision}.`);
+      this._warnedGraphs = true;
+      return;
+    }
+    const index = HANDLE_INDEX[handles] ?? PANTO_BOTH;
+    const nodes = graph.nodes.map((n) => ({ ...this.toDevice(n), entry: n.entry }));
+    for (const p of graphPackets(index, id, { ...graph, nodes })) this._sendTracked(p);
+  }
+  enableGraph(id, handles = 'both') {
+    if (this.supportsGraphs) this._sendTracked(build.enableGraph(HANDLE_INDEX[handles] ?? PANTO_BOTH, id));
+  }
+  disableGraph(id, handles = 'both') {
+    if (this.supportsGraphs) this._sendTracked(build.disableGraph(HANDLE_INDEX[handles] ?? PANTO_BOTH, id));
+  }
+  removeGraph(id, handles = 'both') {
+    if (this.supportsGraphs) this._sendTracked(build.removeGraph(HANDLE_INDEX[handles] ?? PANTO_BOTH, id));
+  }
+  setGraphSinks(id, radius, depth, handles = 'both') {
+    if (this.supportsGraphs) this._sendTracked(build.setGraphSinks(HANDLE_INDEX[handles] ?? PANTO_BOTH, id, radius, depth));
+  }
   setSpeedControl({ tethered = false, factor = 0.01, inner = 1, outer = 5, strategy = 0, pock = false } = {}) {
     this._send(build.speedControl(tethered, factor, inner, outer, strategy, pock));
   }
@@ -438,5 +474,12 @@ const TYPE_NAMES = {
   [MSG.ENABLE_OBSTACLE]: 'ENABLE',
   [MSG.DISABLE_OBSTACLE]: 'DISABLE',
   [MSG.REMOVE_OBSTACLE]: 'REMOVE',
+  [MSG.CREATE_GRAPH]: 'CREATE_GRAPH',
+  [MSG.ADD_GRAPH_NODES]: 'ADD_GRAPH_NODES',
+  [MSG.ADD_GRAPH_EDGES]: 'ADD_GRAPH_EDGES',
+  [MSG.REMOVE_GRAPH]: 'REMOVE_GRAPH',
+  [MSG.ENABLE_GRAPH]: 'ENABLE_GRAPH',
+  [MSG.DISABLE_GRAPH]: 'DISABLE_GRAPH',
+  [MSG.SET_GRAPH_SINKS]: 'SET_GRAPH_SINKS',
 };
 const typeName = (t) => TYPE_NAMES[t] ?? '0x' + t.toString(16);

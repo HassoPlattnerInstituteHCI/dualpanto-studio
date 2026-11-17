@@ -19,13 +19,14 @@ import {
 } from './geometry.js';
 import { StopSignal, Scope } from './scope.js';
 import { Handle } from './handle.js';
-import { WorldObject, Obstacle, Zone, Entity, entityArgs } from './objects.js';
+import { WorldObject, Obstacle, Graph, Zone, Entity, entityArgs } from './objects.js';
+import { GRAPH_DEFAULTS, normalizeGraph } from './graph.js';
 import { loadVoices, makeUtterance, ttsSettings, ttsSupported, hasVoice, findVoice } from './tts.js';
 import { piper, piperVoice, piperSupported, storedPiperVoices, splitSentences, DEFAULT_PIPER_VOICE } from './piper.js';
 import { Level } from './level.js';
 import { createMenu } from './menu.js';
 
-export { StopSignal, Scope, Handle, WorldObject, Obstacle, Zone, Entity, Level };
+export { StopSignal, Scope, Handle, WorldObject, Obstacle, Graph, Zone, Entity, Level };
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -78,6 +79,7 @@ export class Runtime extends Emitter {
     this._unsub.push(
       d.on('position', (hs) => this._onPosition(hs)),
       d.on('transitionEnded', (i) => this.handles[i]?._transition?.resolve(true)),
+      d.on('graphState', (e) => this._onGraphState(e)),
       d.on('deviceReset', () => this._reupload())
     );
     this._onKeyDown = (e) => this._handleKey(e);
@@ -432,8 +434,7 @@ export class Runtime extends Emitter {
     for (const o of this.objects.values()) {
       if (!o._upload || o.removed) continue;
       o._upload();
-      if (o.enabled && !this._deferObstacleActivation)
-        for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
+      if (o.enabled && !this._deferObstacleActivation) o._sendEnable();
       n++;
     }
     this.log('info', `${n} obstacles sent again.`);
@@ -447,7 +448,7 @@ export class Runtime extends Emitter {
     const outside = [];
     const label = (o, i) =>
       o.name ||
-      { wall: 'Wall', rail: 'Rail', zone: 'Zone', entity: 'Object' }[o.type] + ` #${i + 1}`;
+      { wall: 'Wall', rail: 'Rail', graph: 'Graph', zone: 'Zone', entity: 'Object' }[o.type] + ` #${i + 1}`;
     (data.objects ?? []).forEach((o, i) => {
       const handle =
         o.type === 'zone' || o.type === 'entity' ? o.handle ?? 'me' : o.handles ?? 'both';
@@ -526,9 +527,7 @@ export class Runtime extends Emitter {
     if (level && !level.objects.includes(obj)) level.objects.push(obj);
     const dispose = () => {
       obj.removed = true;
-      if (obj.deviceIds) {
-        for (const id of obj.deviceIds) this.device.removeObstacle(id, obj.handles);
-      }
+      if (obj.deviceIds) obj._sendRemove();
       this.objects.delete(obj.id);
       if (level) {
         const i = level.objects.indexOf(obj);
@@ -610,6 +609,79 @@ export class Runtime extends Emitter {
     this._register(obj, persistent);
     if (enabled) obj.enable();
     return obj;
+  }
+
+  /**
+   * Haptic graph. nodes: [[x, y]] or [{x, y, entry}], edges: [[i, j]] (node indices).
+   * Without edges the nodes are connected in order (a path).
+   */
+  createGraph(
+    nodes,
+    edges,
+    {
+      capture = GRAPH_DEFAULTS.capture,
+      junction = GRAPH_DEFAULTS.junction,
+      breakaway = GRAPH_DEFAULTS.breakaway,
+      sinkRadius = GRAPH_DEFAULTS.sinkRadius,
+      sinkDepth = GRAPH_DEFAULTS.sinkDepth,
+      p,
+      i,
+      d,
+      handles = 'both',
+      name = '',
+      enabled = true,
+      persistent = false,
+    } = {}
+  ) {
+    this._assertRunning();
+    const raw = (nodes ?? []).map((n) => (Array.isArray(n) || n?.position == null ? n : { ...n.position, entry: n.entry }));
+    const pathEdges = edges ?? raw.slice(1).map((_, k) => [k, k + 1]);
+    const g = normalizeGraph(raw, pathEdges);
+    if (g.nodes.length < 2 || !g.edges.length) throw new Error('A graph needs at least 2 nodes and 1 edge.');
+    if (!g.nodes.some((n, k) => n.entry && g.edges.some((e) => e.includes(k)))) {
+      this.log('warn', `Graph${name ? ` "${name}"` : ''} has no entry node: the handle can never get on it.`);
+    }
+    if (this.device.supportsGraphs === false) {
+      this.log('warn', 'This device firmware has no haptic graphs (protocol revision 7); the graph is only shown.');
+    }
+    const devId = this._allocDeviceId();
+    const obj = new Graph(this, {
+      id: devId,
+      type: 'graph',
+      name,
+      nodes: g.nodes,
+      edges: g.edges,
+      points: g.nodes.map((n) => ({ x: n.x, y: n.y })),
+      capture,
+      junction,
+      breakaway,
+      sinkRadius,
+      sinkDepth,
+      handles,
+      enabled: false,
+      deviceIds: [devId],
+    });
+    obj._upload = () =>
+      this.device.createGraph?.(devId, {
+        nodes: obj.nodes, edges: obj.edges, capture, junction, breakaway, p, i, d,
+        sinkRadius: obj.sinkRadius, sinkDepth: obj.sinkDepth,
+      }, { handles });
+    obj._upload();
+    this._register(obj, persistent);
+    if (enabled) obj.enable();
+    return obj;
+  }
+
+  /** GRAPH_STATE from the device: a handle entered or left the graph with that id. */
+  _onGraphState({ index, entered, id }) {
+    const handle = this.handles[index];
+    if (!handle) return;
+    for (const o of this.objects.values()) {
+      if (o.type !== 'graph') continue;
+      if (o.id === id) o._setOn(handle, entered);
+      else if (entered) o._setOn(handle, false); // a handle is on one graph at a time
+    }
+    handle._graph = entered ? [...this.objects.values()].find((o) => o.type === 'graph' && o.id === id) ?? null : null;
   }
 
   createZone(
@@ -774,6 +846,17 @@ export class Runtime extends Emitter {
           handles: o.handles ?? 'both',
           bounceBall: o.bounceBall ?? '',
         });
+      case 'graph':
+        return this.createGraph(o.points, o.edges ?? [], {
+          ...common,
+          // entry flags live on the editor's points
+          capture: o.capture ?? GRAPH_DEFAULTS.capture,
+          junction: o.junction ?? GRAPH_DEFAULTS.junction,
+          breakaway: o.breakaway ?? GRAPH_DEFAULTS.breakaway,
+          sinkRadius: o.sinkRadius ?? GRAPH_DEFAULTS.sinkRadius,
+          sinkDepth: o.sinkDepth ?? GRAPH_DEFAULTS.sinkDepth,
+          handles: o.handles ?? 'both',
+        });
       case 'zone':
         return this.createZone(o, { ...common, speak: o.speak ?? '', handle: o.handle ?? 'me', bounceBall: o.bounceBall ?? '' });
       default:
@@ -877,9 +960,7 @@ export class Runtime extends Emitter {
   _activateDeferredObstacles() {
     this._deferObstacleActivation = false;
     for (const o of this.objects.values()) {
-      if (o.enabled && !o.removed && o.deviceIds) {
-        for (const id of o.deviceIds) this.device.enableObstacle(id, o.handles);
-      }
+      if (o.enabled && !o.removed && o.deviceIds) o._sendEnable();
     }
   }
 
@@ -1254,6 +1335,11 @@ export class Runtime extends Emitter {
       circle: (x, y, r, opts = {}) =>
         rt.createWall(circlePoints(x, y, r, opts.corners ?? 16), { closed: true, ...opts }),
       rail: (points, opts) => rt.createRail(points, opts),
+      /** Haptic graph: panto.graph(nodes, edges?, opts) – edges are node index pairs; without them a path. */
+      graph: (nodes, edges, opts) => {
+        if (edges && !Array.isArray(edges)) [edges, opts] = [undefined, edges];
+        return rt.createGraph(nodes, edges, opts);
+      },
       zone: (shape, opts) => rt.createZone(shape, opts),
       /** Visible object (enemy, item, marker). panto.entity(x, y, {…}) */
       entity: (a, b, c) => rt.createEntity(entityArgs(a, b, c)),
@@ -1265,7 +1351,7 @@ export class Runtime extends Emitter {
       entities: (kind) => rt.entities(kind),
       /** Object of the scene by name – also works in the main script, without `level`. */
       find: (name) => rt.find(name),
-      /** All objects of the scene, optionally by type ("wall", "rail", "zone", "entity"). */
+      /** All objects of the scene, optionally by type ("wall", "rail", "graph", "zone", "entity"). */
       objects: (type) => rt.sceneObjects(type),
       loadLevel: (name) => rt.loadLevel(name),
       nextLevel: () => {
