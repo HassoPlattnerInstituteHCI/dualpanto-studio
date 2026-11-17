@@ -1,7 +1,8 @@
-// Visual level editor: draw walls, rails, zones and start positions.
+// Visual level editor: draw walls, rails, haptic graphs, zones and start positions.
 
 import { fitView, drawWorld } from './renderer.js';
-import { dist, distToSegment, edges, shapeContains, rectPoints, clampToPolygon } from '../panto/geometry.js';
+import { dist, distToSegment, closestOnSegment, edges, shapeContains, rectPoints, clampToPolygon } from '../panto/geometry.js';
+import { GRAPH_DEFAULTS } from '../panto/graph.js';
 import { uid } from './project.js';
 import { workAreaFor } from '../panto/areas.js';
 
@@ -10,6 +11,7 @@ export const TOOLS = [
   { key: 'wall', label: 'Wall', hint: 'Place points. Double-click or Enter finishes, clicking the first point closes the shape.', shortcut: 'W' },
   { key: 'box', label: 'Box', hint: 'Drag a rectangle: a closed wall.', shortcut: 'B' },
   { key: 'rail', label: 'Rail', hint: 'Place points (hallway). Double-click or Enter finishes.', shortcut: 'R' },
+  { key: 'graph', label: 'Graph', hint: 'Haptic graph (grooves the handle slides along). Click to place nodes, each one connected to the previous. Click a node to branch or close a loop from it, click an edge to add a junction. Shift+click toggles an entry node. Enter or double-click ends the path, Backspace removes the current node.', shortcut: 'G' },
   { key: 'zone', label: 'Zone', hint: 'Drag a rectangle: an area that reacts when entered.', shortcut: 'Z' },
   { key: 'zoneCircle', label: 'Round zone', hint: 'Drag out from the centre.', shortcut: 'C' },
   { key: 'enemy', label: 'Enemy', hint: 'Click to place an enemy. It is shown and reacts when Me touches it. In the script: level.entity("Name").', shortcut: 'E' },
@@ -32,6 +34,7 @@ export class LevelEditor {
     this.selectedId = null;
     this.snap = true;
     this.draft = null; // points of polyline in progress
+    this.graphCursor = null; // graph tool: index of the node the next click connects to
     this.drag = null;
     this.hover = null;
     this.undoStack = [];
@@ -48,6 +51,7 @@ export class LevelEditor {
     this.level = level;
     this.selectedId = null;
     this.draft = null;
+    this.graphCursor = null;
     // keep zoom and pan when the same level is shown again
     if (changed) this.resetView();
     this.undoStack = [];
@@ -81,6 +85,7 @@ export class LevelEditor {
   }
 
   select(id) {
+    if (id !== this.selectedId) this._endGraphChain();
     this.selectedId = id;
     this.onSelect?.(this.selected);
     this.draw();
@@ -261,6 +266,7 @@ export class LevelEditor {
     Object.assign(this.level, data);
     if (areaChanged) this.resetView();
     if (!this.selected) this.selectedId = null;
+    this.graphCursor = null;
     this.onSelect?.(this.selected);
     this.changed();
   }
@@ -281,6 +287,7 @@ export class LevelEditor {
     if (!this.selected) return;
     this.snapshot();
     this.level.objects = this.level.objects.filter((o) => o.id !== this.selectedId);
+    this.graphCursor = null;
     this.select(null);
     this.changed();
   }
@@ -363,6 +370,10 @@ export class LevelEditor {
       if (o.type === 'wall' || o.type === 'rail') {
         for (const [a, b] of edges(o.points, o.closed)) if (distToSegment(p, a, b) < tol) return { obj: o };
       }
+      if (o.type === 'graph') {
+        if (o.points.some((q) => dist(q, p) < tol * 1.2)) return { obj: o };
+        for (const [a, b] of graphSegments(o)) if (distToSegment(p, a, b) < tol) return { obj: o };
+      }
     }
     for (const o of objs) if (o.type === 'zone' && shapeContains(o, p)) return { obj: o };
     for (const key of ['me', 'it']) {
@@ -420,6 +431,10 @@ export class LevelEditor {
       this.draw();
       return;
     }
+    if (t === 'graph') {
+      this._graphClick(raw, p, e.shiftKey);
+      return;
+    }
     if (t === 'box' || t === 'zone' || t === 'zoneCircle') {
       this.drag = { kind: 'create', tool: t, start: p, end: p };
       return;
@@ -465,7 +480,7 @@ export class LevelEditor {
       const apply = (o, patch) => {
         if (this._fits({ ...o, ...patch })) Object.assign(o, patch);
       };
-      if (d.kind === 'vertex') d.obj.points[d.i] = p;
+      if (d.kind === 'vertex') d.obj.points[d.i] = { ...d.obj.points[d.i], ...p };
       else if (d.kind === 'spawn') this.level.spawn[d.key] = p;
       else if (d.kind === 'radius') apply(d.obj, { r: Math.max(3, Math.round(dist(d.obj, p))) });
       else if (d.kind === 'corner') {
@@ -475,7 +490,7 @@ export class LevelEditor {
         const dy = p.y - d.start.y;
         const o = d.obj;
         const patch = {};
-        if (o.points) patch.points = d.orig.points.map((q) => ({ x: q.x + dx, y: q.y + dy }));
+        if (o.points) patch.points = d.orig.points.map((q) => ({ ...q, x: q.x + dx, y: q.y + dy }));
         if (o.shape === 'rect' || o.shape === 'circle') {
           patch.x = d.orig.x + dx;
           patch.y = d.orig.y + dy;
@@ -492,7 +507,7 @@ export class LevelEditor {
       const hit = this._hit(raw);
       this.canvas.style.cursor = hit ? (hit.vertex != null || hit.corner || hit.radius ? 'grab' : 'move') : 'default';
     } else this.canvas.style.cursor = 'crosshair';
-    if (this.draft) this.draw();
+    if (this.draft || this.graphCursor != null) this.draw();
   }
 
   _up() {
@@ -550,7 +565,109 @@ export class LevelEditor {
     return `${base} ${i}`;
   }
 
+  // ---- graph tool -----------------------------------------------------------
+  get _graph() {
+    const s = this.selected;
+    return s?.type === 'graph' ? s : null;
+  }
+
+  _graphClick(raw, p, toggleEntry) {
+    const tol = this._tol() * 1.5;
+    let g = this._graph;
+    const nodeAt = (o) => o.points.findIndex((q) => dist(q, raw) < tol);
+    // a node of another graph: continue that graph from there
+    if (!g || nodeAt(g) < 0) {
+      const other = [...this.level.objects].reverse().find((o) => o.type === 'graph' && o !== g && nodeAt(o) >= 0);
+      if (other && this.graphCursor == null) {
+        this.select(other.id);
+        if (toggleEntry) this._toggleEntry(other, nodeAt(other));
+        else this.graphCursor = nodeAt(other);
+        this.draw();
+        return;
+      }
+    }
+    this.snapshot();
+    if (!g) {
+      g = {
+        id: uid('o'), type: 'graph', name: this._name('Graph'), points: [{ ...p, entry: true }], edges: [],
+        capture: GRAPH_DEFAULTS.capture, junction: GRAPH_DEFAULTS.junction, breakaway: GRAPH_DEFAULTS.breakaway,
+        sinkRadius: GRAPH_DEFAULTS.sinkRadius, sinkDepth: GRAPH_DEFAULTS.sinkDepth, handles: 'both',
+      };
+      this.level.objects.push(g);
+      this.select(g.id);
+      this.graphCursor = 0;
+      this.changed();
+      return;
+    }
+    let i = nodeAt(g);
+    if (i >= 0 && toggleEntry) return this._toggleEntry(g, i);
+    if (i < 0) {
+      // on an edge: split it there (a junction); otherwise a new node
+      const hitEdge = g.edges.findIndex(([a, b]) => distToSegment(raw, g.points[a], g.points[b]) < tol / 1.5);
+      if (hitEdge >= 0) {
+        const [a, b] = g.edges[hitEdge];
+        const q = closestOnSegment(raw, g.points[a], g.points[b]).point;
+        i = g.points.push({ x: q.x, y: q.y, entry: true }) - 1;
+        g.edges.splice(hitEdge, 1, [a, i], [i, b]);
+      } else {
+        i = g.points.push({ ...p, entry: true }) - 1;
+      }
+    }
+    const c = this.graphCursor;
+    if (c != null && c !== i && g.points[c] && !g.edges.some(([a, b]) => (a === c && b === i) || (a === i && b === c))) {
+      g.edges.push([c, i]);
+    }
+    this.graphCursor = i;
+    this.changed();
+  }
+
+  _toggleEntry(g, i) {
+    this.snapshot();
+    g.points[i] = { ...g.points[i], entry: g.points[i].entry === false };
+    this.changed();
+  }
+
+  /** Graph tool: Backspace removes the current node and its edges. */
+  _removeGraphNode() {
+    const g = this._graph;
+    const i = this.graphCursor;
+    if (!g || i == null) return false;
+    this.snapshot();
+    const neighbour = g.edges.find(([a, b]) => a === i || b === i);
+    const next = neighbour ? (neighbour[0] === i ? neighbour[1] : neighbour[0]) : null;
+    removeNodes(g, new Set([i]));
+    this.graphCursor = next == null ? null : next > i ? next - 1 : next;
+    if (!g.points.length) {
+      this.level.objects = this.level.objects.filter((o) => o !== g);
+      this.graphCursor = null;
+      this.select(null);
+    }
+    this.changed();
+    return true;
+  }
+
+  /** Ends the path being drawn and drops nodes without edges (and the graph if nothing is left). */
+  _endGraphChain() {
+    this.graphCursor = null;
+    const g = this._graph;
+    if (!g || !this.level) return;
+    const used = new Set(g.edges.flat());
+    const lonely = new Set(g.points.map((_, i) => i).filter((i) => !used.has(i)));
+    if (!lonely.size) return;
+    removeNodes(g, lonely);
+    if (!g.edges.length) {
+      this.level.objects = this.level.objects.filter((o) => o !== g);
+      this.selectedId = null;
+      this.onSelect?.(null);
+    }
+    this.onChange?.();
+  }
+
   finishDraft(close = false) {
+    if (this.graphCursor != null) {
+      this._endGraphChain();
+      this.draw();
+    }
     const d = this.draft;
     this.draft = null;
     if (!d || !this.level) return this.draw();
@@ -581,10 +698,18 @@ export class LevelEditor {
     }
     if (e.key === 'Enter') return this.finishDraft();
     if (e.key === 'Escape') {
-      if (this.draft) {
+      if (this.graphCursor != null) {
+        this._endGraphChain();
+        this.draw();
+      } else if (this.draft) {
         this.draft = null;
         this.draw();
       } else this.select(null);
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && this.tool === 'graph' && this.graphCursor != null) {
+      e.preventDefault();
+      this._removeGraphNode();
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
@@ -625,7 +750,24 @@ export class LevelEditor {
           : { type: 'zone', shape: 'rect', x, y, w, h }];
       }
     }
-    drawWorld(this.ctx, this.view, scene, { selectedId: this.selectedId, showVertices: true });
+    drawWorld(this.ctx, this.view, scene, { selectedId: this.selectedId, showVertices: true, graphCursor: this.graphCursor });
+    // graph tool: the edge the next click adds
+    const g = this._graph;
+    if (this.tool === 'graph' && g && this.graphCursor != null && g.points[this.graphCursor] && this.hover) {
+      const a = this.view.toScreen(g.points[this.graphCursor]);
+      const b = this.view.toScreen(this.hover);
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.setTransform(this.view.dpr, 0, 0, this.view.dpr, 0, 0);
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--c-graph') || '#b8327f';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+    }
     // rect/circle resize handles
     const s = this.selected;
     if ((s?.type === 'zone' || s?.type === 'entity') && (s.shape === 'rect' || s.shape === 'circle')) {
@@ -652,4 +794,22 @@ export class LevelEditor {
       ctx.restore();
     }
   }
+}
+
+/** Line segments of a graph (pairs of points). */
+function graphSegments(o) {
+  return (o.edges ?? []).map(([a, b]) => [o.points[a], o.points[b]]).filter(([a, b]) => a && b);
+}
+
+/** Removes nodes from a graph and renumbers the edges. */
+function removeNodes(g, remove) {
+  const map = new Map();
+  const points = [];
+  g.points.forEach((q, i) => {
+    if (remove.has(i)) return;
+    map.set(i, points.length);
+    points.push(q);
+  });
+  g.points = points;
+  g.edges = g.edges.filter(([a, b]) => map.has(a) && map.has(b)).map(([a, b]) => [map.get(a), map.get(b)]);
 }

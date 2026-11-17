@@ -1,9 +1,12 @@
-// DualPanto serial protocol, revision 6.
+// DualPanto serial protocol, revision 7 (revision 6 is still accepted, without haptic graphs).
 // Source of truth: dualpantoframework/documentation/protocol/protocol.md,
 // utils/serial/src (host side) and firmware/src/utils/serial.cpp (device side).
 // All multi-byte values are big-endian. Floats are IEEE 754 single precision.
 
-export const REVISION = 6;
+export const REVISION = 7;
+/** Firmware revisions the studio can talk to. Haptic graphs (0xB0–0xB6) need revision 7. */
+export const SUPPORTED_REVISIONS = [6, 7];
+export const GRAPH_REVISION = 7;
 export const BAUD_RATE = 115200;
 export const MAGIC = [0x44, 0x50]; // "DP"
 export const HEADER_SIZE = 4; // type, packet id, payload size (u16)
@@ -19,8 +22,10 @@ export const MSG = Object.freeze({
   INVALID_PACKET_ID: 0x05,
   INVALID_DATA: 0x06,
   POSITION: 0x10,
+  GRAPH_STATE: 0x11, // revision 7: a handle entered or left a haptic graph
   DEBUG_LOG: 0x20,
   TRANSITION_ENDED: 0x93, // sent by the device although it is in the host range
+  PID_CALIBRATION_ENDED: 0x94, // revision 7
   // host -> device
   SYNC_ACK: 0x80,
   HEARTBEAT_ACK: 0x81,
@@ -38,6 +43,15 @@ export const MSG = Object.freeze({
   FREEZE: 0xa8,
   FREE: 0xa9,
   SPEED_CONTROL: 0xaa,
+  CALIBRATE_PID: 0xab, // revision 7
+  // haptic graphs, revision 7
+  CREATE_GRAPH: 0xb0,
+  ADD_GRAPH_NODES: 0xb1,
+  ADD_GRAPH_EDGES: 0xb2,
+  REMOVE_GRAPH: 0xb3,
+  ENABLE_GRAPH: 0xb4,
+  DISABLE_GRAPH: 0xb5,
+  SET_GRAPH_SINKS: 0xb6,
   DUMP_HASHTABLE: 0xc0,
 });
 
@@ -50,7 +64,20 @@ export const TRACKED = new Set([
   MSG.DISABLE_OBSTACLE,
   MSG.CREATE_PASSABLE_OBSTACLE,
   MSG.CREATE_RAIL,
+  MSG.CREATE_GRAPH,
+  MSG.ADD_GRAPH_NODES,
+  MSG.ADD_GRAPH_EDGES,
+  MSG.REMOVE_GRAPH,
+  MSG.ENABLE_GRAPH,
+  MSG.DISABLE_GRAPH,
+  MSG.SET_GRAPH_SINKS,
 ]);
+
+export const GRAPH_NODE_ENTRY = 0x01;
+// Keep tracked packets small: with its ACK a packet should go out well within the firmware's
+// 10 ms resend timeout (about 115 bytes at 115200 baud). Same chunking as graphTest.py.
+export const GRAPH_NODES_PER_PACKET = 8; // 6 header + 3 + 11 per node = 97 bytes
+export const GRAPH_EDGES_PER_PACKET = 20; // 6 header + 3 + 4 per edge = 89 bytes
 
 export const CONTROL = Object.freeze({ POSITION: 0x00, FORCE: 0x01 });
 export const PANTO_BOTH = 0xff;
@@ -141,7 +168,48 @@ export const build = {
       MSG.SPEED_CONTROL,
       new PayloadWriter(15).u8(tethered ? 1 : 0).f32(factor).f32(inner).f32(outer).u8(strategy).u8(pock ? 1 : 0).bytes()
     ),
+  /** Negative or NaN p/i/d: the device uses the walls' PID gains. */
+  createGraph: (index, id, capture, junction, breakaway, p = -1, i = -1, d = -1) =>
+    encodePacket(
+      MSG.CREATE_GRAPH,
+      new PayloadWriter(27).u8(index).u16(id).f32(capture).f32(junction).f32(breakaway).f32(p).f32(i).f32(d).bytes()
+    ),
+  /** nodes: [{ id, x, y, entry }] in device coordinates */
+  addGraphNodes: (index, id, nodes) => {
+    const w = new PayloadWriter(3 + nodes.length * 11).u8(index).u16(id);
+    for (const n of nodes) w.u16(n.id).f32(n.x).f32(n.y).u8(n.entry ? GRAPH_NODE_ENTRY : 0);
+    return encodePacket(MSG.ADD_GRAPH_NODES, w.bytes());
+  },
+  /** edges: [[nodeId, nodeId]] */
+  addGraphEdges: (index, id, edges) => {
+    const w = new PayloadWriter(3 + edges.length * 4).u8(index).u16(id);
+    for (const [a, b] of edges) w.u16(a).u16(b);
+    return encodePacket(MSG.ADD_GRAPH_EDGES, w.bytes());
+  },
+  removeGraph: (index, id) => encodePacket(MSG.REMOVE_GRAPH, new PayloadWriter(3).u8(index).u16(id).bytes()),
+  enableGraph: (index, id) => encodePacket(MSG.ENABLE_GRAPH, new PayloadWriter(3).u8(index).u16(id).bytes()),
+  disableGraph: (index, id) => encodePacket(MSG.DISABLE_GRAPH, new PayloadWriter(3).u8(index).u16(id).bytes()),
+  setGraphSinks: (index, id, radius, depth) =>
+    encodePacket(MSG.SET_GRAPH_SINKS, new PayloadWriter(11).u8(index).u16(id).f32(radius).f32(depth).bytes()),
 };
+
+/**
+ * Graph upload sequence (protocol.md "Haptic graphs"): create, nodes, edges, sinks. Node ids are
+ * the indices into nodes. Sinks only when set (CREATE_GRAPH resets them). Enable separately.
+ * nodes: [{x, y, entry}] in device coordinates, edges: [[i, j]].
+ */
+export function graphPackets(index, id, { nodes, edges, capture, junction, breakaway, p, i, d, sinkRadius = 0, sinkDepth = 0 }) {
+  const packets = [build.createGraph(index, id, capture, junction, breakaway, p ?? -1, i ?? -1, d ?? -1)];
+  for (let k = 0; k < nodes.length; k += GRAPH_NODES_PER_PACKET) {
+    const chunk = nodes.slice(k, k + GRAPH_NODES_PER_PACKET).map((n, j) => ({ ...n, id: k + j }));
+    packets.push(build.addGraphNodes(index, id, chunk));
+  }
+  for (let k = 0; k < edges.length; k += GRAPH_EDGES_PER_PACKET) {
+    packets.push(build.addGraphEdges(index, id, edges.slice(k, k + GRAPH_EDGES_PER_PACKET)));
+  }
+  if (sinkRadius > 0 && sinkDepth) packets.push(build.setGraphSinks(index, id, sinkRadius, sinkDepth));
+  return packets;
+}
 
 /**
  * Obstacle upload sequence as done by the Unity toolkit (PantoCollider.CreateFromCorners):
@@ -231,6 +299,11 @@ export function decodePosition(view) {
     });
   }
   return handles;
+}
+
+/** Decodes GRAPH_STATE: panto index (u8), state (u8, 1 entered), graph id (u16). */
+export function decodeGraphState(view) {
+  return { index: view.getUint8(0), entered: view.getUint8(1) === 1, id: view.getUint16(2, false) };
 }
 
 export function decodeText(payload) {

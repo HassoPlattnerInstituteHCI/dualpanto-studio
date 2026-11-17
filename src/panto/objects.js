@@ -1,4 +1,4 @@
-// World objects: Obstacles (walls, rails), Zones, and Entities (enemies, items, markers).
+// World objects: Obstacles (walls, rails), haptic Graphs, Zones, and Entities (enemies, items, markers).
 
 import {
   toPoint,
@@ -26,9 +26,7 @@ export class Obstacle extends WorldObject {
   enable() {
     if (this.enabled || this.removed) return this;
     this.enabled = true;
-    if (!this._rt._deferObstacleActivation) {
-      for (const id of this.deviceIds) this._rt.device.enableObstacle(id, this.handles);
-    }
+    if (!this._rt._deferObstacleActivation) this._sendEnable();
     this._rt._changed();
     return this;
   }
@@ -36,13 +34,99 @@ export class Obstacle extends WorldObject {
   disable() {
     if (!this.enabled || this.removed) return this;
     this.enabled = false;
-    for (const id of this.deviceIds) this._rt.device.disableObstacle(id, this.handles);
+    this._sendDisable();
     this._rt._changed();
     return this;
   }
 
+  // device messages; Graph overrides them
+  _sendEnable() {
+    for (const id of this.deviceIds) this._rt.device.enableObstacle(id, this.handles);
+  }
+  _sendDisable() {
+    for (const id of this.deviceIds) this._rt.device.disableObstacle(id, this.handles);
+  }
+  _sendRemove() {
+    for (const id of this.deviceIds) this._rt.device.removeObstacle(id, this.handles);
+  }
+
   remove() {
     this._dispose?.();
+  }
+}
+
+/**
+ * A haptic graph: hallways without width (nodes connected by edges) that feel like a groove.
+ * The handle enters at an entry node and then can only move along the edges, turning at the
+ * nodes; pulling hard away from it (breakaway distance) leaves it. Needs firmware with
+ * protocol revision 7 – the emulator always has it.
+ */
+export class Graph extends Obstacle {
+  constructor(rt, data) {
+    super(rt, data);
+    this._enter = new Set();
+    this._leave = new Set();
+    this._on = new Map(); // handle index -> on the graph
+  }
+
+  _sendEnable() {
+    this._rt.device.enableGraph?.(this.id, this.handles);
+  }
+  // the device answers both with GRAPH_STATE "left" for a handle on it, which fires onLeave
+  _sendDisable() {
+    this._rt.device.disableGraph?.(this.id, this.handles);
+  }
+  _sendRemove() {
+    this._rt.device.removeGraph?.(this.id, this.handles);
+  }
+
+  /** true while the handle ("me" / "it") is on this graph. */
+  isOn(handle = 'me') {
+    return !!this._on.get(handle === 'it' || handle?.index === 1 ? 1 : 0);
+  }
+
+  /** fn(handle) when a handle enters the graph. */
+  onEnter(fn) {
+    const g = this._rt._guard(fn);
+    this._enter.add(g);
+    return this._rt._scope().add(() => this._enter.delete(g));
+  }
+
+  /** fn(handle) when a handle leaves the graph (breaking away, disable, remove). */
+  onLeave(fn) {
+    const g = this._rt._guard(fn);
+    this._leave.add(g);
+    return this._rt._scope().add(() => this._leave.delete(g));
+  }
+
+  /**
+   * Makes the nodes feel like dips (depth > 0) or bumps (depth < 0) within radius mm along the
+   * edges. radius 0 turns them off.
+   */
+  setSinks(radius, depth = this.sinkDepth) {
+    this.sinkRadius = Math.max(0, +radius || 0);
+    this.sinkDepth = +depth || 0;
+    if (!this.removed) this._rt.device.setGraphSinks?.(this.id, this.sinkRadius, this.sinkDepth, this.handles);
+    this._rt._changed();
+    return this;
+  }
+
+  /** Node closest to a point (index and position). */
+  nearestNode(p) {
+    const q = p?.position ?? p;
+    let best = null;
+    this.nodes.forEach((n, index) => {
+      const d = Math.hypot(n.x - q.x, n.y - q.y);
+      if (!best || d < best.distance) best = { index, x: n.x, y: n.y, distance: d };
+    });
+    return best;
+  }
+
+  _setOn(handle, on) {
+    if (this.isOn(handle.index === 1 ? 'it' : 'me') === on) return;
+    this._on.set(handle.index, on);
+    for (const fn of on ? this._enter : this._leave) fn(handle, this);
+    this._rt._changed();
   }
 }
 

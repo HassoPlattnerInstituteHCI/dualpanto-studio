@@ -8,6 +8,7 @@ import {
   sub, add, mul, dot, norm, dist, lerp, edges, segmentIntersection, closestOnSegment, clampToPolygon, polygonCentroid,
 } from './geometry.js';
 import { DEVICE_PROFILES } from './webserial.js';
+import { HapticGraph, pointAt } from './graph.js';
 
 const HANDLE_MASK = { me: [0], it: [1], both: [0, 1] };
 const TICK_MS = 1000 / 60;
@@ -21,6 +22,7 @@ export class Emulator extends Emitter {
     this.profile = profile;
     this.connected = true;
     this.obstacles = new Map(); // id -> {kind:'wall'|'rail', points, closed, passable, handles, enabled, displacement}
+    this.graphs = new Map(); // id -> { graph: HapticGraph, handles, enabled }
     const startOf = (i) => {
       const area = profile.areas?.[i ? 'it' : 'me'];
       if (area) return polygonCentroid(area);
@@ -38,6 +40,7 @@ export class Emulator extends Emitter {
       target: null,
       speed: 1, // firmware semantics: 1/duration in seconds
       force: null,
+      graph: null, // { id, pos } while the handle is on a haptic graph
     }));
     this._timer = null;
   }
@@ -104,6 +107,65 @@ export class Emulator extends Emitter {
   removeObstacle(id) {
     this.obstacles.delete(id);
   }
+  // ---- haptic graphs (like firmware GodObject::moveOnGraph) ---------------
+  supportsGraphs = true;
+  createGraph(id, graph, { handles = 'both' } = {}) {
+    this.removeGraph(id);
+    const g = new HapticGraph(graph);
+    g.setSinks(graph.sinkRadius ?? 0, graph.sinkDepth ?? 0);
+    this.graphs.set(id, { graph: g, handles, enabled: false });
+  }
+  enableGraph(id) {
+    const g = this.graphs.get(id);
+    if (g) g.enabled = true;
+  }
+  disableGraph(id) {
+    const g = this.graphs.get(id);
+    if (!g) return;
+    g.enabled = false;
+    for (const h of this.handles) if (h.graph?.id === id) this._leaveGraph(h);
+  }
+  removeGraph(id) {
+    if (!this.graphs.has(id)) return;
+    for (const h of this.handles) if (h.graph?.id === id) this._leaveGraph(h);
+    this.graphs.delete(id);
+  }
+  setGraphSinks(id, radius, depth) {
+    this.graphs.get(id)?.graph.setSinks(radius, depth);
+  }
+  _leaveGraph(h) {
+    const id = h.graph.id;
+    h.graph = null;
+    h.god = { ...h.pos };
+    this.emit('graphState', { index: h.index, entered: false, id });
+  }
+  /**
+   * God object on a graph, or null when the handle is not on one. While the program moves the
+   * handle (transition), it can't enter a graph and the walk only follows along.
+   */
+  _graphGod(h, transitioning) {
+    if (!h.graph) {
+      if (transitioning) return null;
+      for (const [id, g] of this.graphs) {
+        if (!g.enabled || !HANDLE_MASK[g.handles]?.includes(h.index)) continue;
+        const entry = g.graph.findEntry(h.pos);
+        if (!entry) continue;
+        h.graph = { id, pos: entry };
+        this.emit('graphState', { index: h.index, entered: true, id });
+        break;
+      }
+      if (!h.graph) return null;
+    }
+    const g = this.graphs.get(h.graph.id).graph;
+    g.walk(h.graph.pos, h.pos);
+    const p = pointAt(h.graph.pos);
+    if (!transitioning && g.isBreakingAway({ x: p.x - h.pos.x, y: p.y - h.pos.y })) {
+      this._leaveGraph(h);
+      return null;
+    }
+    return p;
+  }
+
   moveHandle(index, pos, rotDeg = null) {
     const h = this.handles[index];
     h.force = null;
@@ -178,20 +240,21 @@ export class Emulator extends Emitter {
           h.tween = null;
           this.emit('transitionEnded', h.index);
         }
-        h.god = { ...h.pos }; // the motors drag the god object along
+        h.god = this._graphGod(h, true) ?? { ...h.pos }; // the motors drag the god object along
       } else if (h.force) {
         // The mouse cannot provide real resistance. Approximate force control by
         // driving the virtual handle in the commanded direction.
         if (h.pointer) h.pos = { ...h.pointer };
         h.pos = this._clamp(add(h.pos, mul(h.force.dir, 120 * h.force.strength * dt)), h.index);
-        h.god = this._moveGod(h.index, h.god, h.pos);
+        h.god = this._graphGod(h, false) ?? this._moveGod(h.index, h.god, h.pos);
       } else if (h.held && h.target) {
         // position controlled by the program: the user cannot move it
         h.pos = { ...h.target };
-        h.god = { ...h.pos };
+        h.god = this._graphGod(h, true) ?? { ...h.pos };
       } else {
         if (h.pointer) h.pos = { ...h.pointer };
-        h.god = this._moveGod(h.index, h.god, h.pos);
+        // on a graph walls are ignored, like on the device
+        h.god = this._graphGod(h, false) ?? this._moveGod(h.index, h.god, h.pos);
       }
       // Track the current velocity (initial velocity of the next move)
       h.vel = dt > 0 ? { x: (h.pos.x - before.x) / dt, y: (h.pos.y - before.y) / dt } : { x: 0, y: 0 };
@@ -261,6 +324,11 @@ export class Emulator extends Emitter {
     }
     if (rail && !walls.some((w) => !w.passable && segmentIntersection(p, rail.point, w.a, w.b) != null)) p = rail.point;
     return p;
+  }
+
+  /** Graph the handle is on (graph id), or null. */
+  graphOf(index) {
+    return this.handles[index]?.graph?.id ?? null;
   }
 
   /** Snapshot of obstacles for rendering. */

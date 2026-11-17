@@ -1058,6 +1058,12 @@ target.onTouch(() => speak("Found it!"));
 // target.follow(me, { speed: 30 });   // follows the Me handle
 // target.attachTo("it");              // It keeps moving there`;
   }
+  if (obj.type === 'graph') {
+    return `const graph = level.object(${name});
+graph.onEnter((handle) => speak("On the path"));
+graph.onLeave((handle) => speak("Off the path"));
+// graph.setSinks(8, 1.5);   // nodes feel like dips`;
+  }
   return `const obj = level.object(${name});\nobj.disable(); // e.g. open a door`;
 }
 
@@ -1133,8 +1139,8 @@ function renderProps(obj) {
 
   const typeLabel = obj.type === 'entity'
     ? { enemy: 'Enemy', item: 'Item', ball: 'Ball' }[obj.kind] ?? 'Object'
-    : { wall: 'Wall', rail: 'Rail', zone: 'Zone' }[obj.type];
-  const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'wall' || obj.type === 'rail' ? 'optional, e.g. Door' : 'e.g. Goal' });
+    : { wall: 'Wall', rail: 'Rail', graph: 'Graph', zone: 'Zone' }[obj.type];
+  const nameIn = h('input', { type: 'text', value: obj.name ?? '', placeholder: obj.type === 'wall' || obj.type === 'rail' ? 'optional, e.g. Door' : obj.type === 'graph' ? 'e.g. Maze' : 'e.g. Goal' });
   let before = obj.name;
   nameIn.addEventListener('input', () => ed.update(obj, { name: nameIn.value }, { history: false }));
   nameIn.addEventListener('focus', () => {
@@ -1204,6 +1210,29 @@ function renderProps(obj) {
       ...select('Handles', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
       ...ballBounce(),
       ...check('Active on start', 'enabled', null, true)
+    );
+  } else if (obj.type === 'graph') {
+    const nodes = obj.points?.length ?? 0;
+    const entries = (obj.points ?? []).filter((q) => q.entry !== false).length;
+    const setAll = (entry) => {
+      ed.update(obj, { points: obj.points.map((q) => ({ ...q, entry })) });
+      renderProps(obj);
+    };
+    grid.append(
+      ...propRow('Nodes', h('span', { class: 'muted' }, `${nodes} nodes, ${obj.edges?.length ?? 0} edges, ${entries} entr${entries === 1 ? 'y' : 'ies'}`),
+        'Draw with the Graph tool. Shift+click a node to make it an entry or not.'),
+      ...propRow('Entries', [
+        h('button', { class: 'link-btn', onclick: () => setAll(true) }, 'All nodes'),
+        h('button', { class: 'link-btn', onclick: () => setAll(false) }, 'None'),
+      ], 'The handle gets on the graph near an entry node (filled dot).'),
+      ...range('Capture', 'capture', { min: 1, max: 20, step: 0.5, initial: 5, hint: 'How close to an entry node the handle has to get to be caught (dashed circle).' }),
+      ...range('Junction', 'junction', { min: 0, max: 15, step: 0.5, initial: 4, hint: 'Within this distance of a node the handle can turn into another edge. Keep it below half of the shortest edge.' }),
+      ...range('Breakaway', 'breakaway', { min: 0, max: 40, step: 1, initial: 15, hint: 'Pulling this far off the edge leaves the graph. 0: never.' }),
+      ...range('Sink radius', 'sinkRadius', { min: 0, max: 30, step: 0.5, initial: 0, hint: 'Nodes feel like dips that pull the handle in within this distance along the edges. 0: off.' }),
+      ...range('Sink depth', 'sinkDepth', { min: -5, max: 5, step: 0.25, initial: 1.5, hint: 'How strongly the dips pull. Negative: bumps that push away from the nodes.' }),
+      ...select('Handles', 'handles', [['both', 'Both handles'], ['me', 'Me only'], ['it', 'It only']], 'both'),
+      ...check('Active on start', 'enabled', null, true),
+      ...propRow('', h('span', { class: 'muted small' }, 'Felt on a device with protocol revision 7 firmware (haptic graphs) and in the emulator; sinks only on the device.'))
     );
   } else if (obj.type === 'entity') {
     const kindSel = h('select', {}, [['enemy', 'Enemy'], ['item', 'Item'], ['marker', 'Marker'], ['ball', 'Ball']]
@@ -1777,7 +1806,10 @@ async function init() {
       if (!info?.live) {
         refreshThumbs();
         renderAreaModes();
-        if (!app.levelEditor.selected) renderProps(null);
+        const sel = app.levelEditor.selected;
+        if (!sel) renderProps(null);
+        // the graph tool changes nodes and edges: keep the counts current, unless a field is being edited
+        else if (sel.type === 'graph' && !$('#props').contains(document.activeElement)) renderProps(sel);
       }
     },
     onSelect: (obj) => renderProps(obj),
