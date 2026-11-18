@@ -1089,6 +1089,7 @@ export class Runtime extends Emitter {
         spoken();
         resolve();
       };
+      u.onstart = () => this.emit('speechstart', text);
       u.onend = done;
       u.onerror = done;
       // browsers without voices never fire "end": resolve after an estimate
@@ -1147,6 +1148,7 @@ export class Runtime extends Emitter {
       };
       this._speechSource = src;
       src.start();
+      this.emit('speechstart');
     });
   }
 

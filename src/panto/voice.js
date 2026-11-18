@@ -184,6 +184,7 @@ export class VoiceInput extends Emitter {
     this._commands = new Set();
     this._intents = new Set();
     this._intentFired = new Set();
+    this._timing = null; // when the current utterance started, see _timingReport()
     this._intentRevision = 0;
     this._intentWarmSignature = '';
     this._intentModelWarm = Promise.resolve(false);
@@ -272,6 +273,7 @@ export class VoiceInput extends Emitter {
       } catch {}
     }
     rec.onresult = (ev) => this._onResult(ev);
+    rec.onspeechstart = () => this._timingStart();
     rec.onerror = (ev) => this._onError(ev);
     rec.onend = () => this._onEnd();
     rec.onstart = () => {
@@ -387,15 +389,23 @@ export class VoiceInput extends Emitter {
     const recognitionConfidence = Number.isFinite(res[0]?.confidence) ? res[0].confidence : null;
     if (!text) return;
     if (this.rt) this.rt.heard = text;
+    this._timingStart();
+    this._timing.words ??= performance.now();
     if (!res.isFinal) {
       for (const fn of this._partial) fn(normalize(text), text);
-      this._dispatchIntents(alts, { final: false, recognitionConfidence }).catch((e) => this._intentModelWarning(e));
+      // interim results are checked for echo too: an interim intent could otherwise react
+      // to the program's own speech output ("red" while It reads a red cell)
+      if (!this._isEcho(text)) this._dispatchIntents(alts, { final: false, recognitionConfidence }).catch((e) => this._intentModelWarning(e));
       this.emit('partial', text);
       this.rt?.emit?.('voice', { state: this.state, text, partial: true });
       return;
     }
-    if (this._isEcho(text)) {
+    this._timing.final = performance.now();
+    // an utterance that already triggered an interim intent is the person's, not our echo
+    // (our confirmation can start before their final result arrives)
+    if (!this._intentFired.size && this._isEcho(text)) {
       this.rt?.log('device', `[Microphone] dropped own output: "${text}"`);
+      this._timing = null;
       return;
     }
     this.lastText = text;
@@ -405,6 +415,7 @@ export class VoiceInput extends Emitter {
     if (this._askResolve) {
       const done = this._askResolve;
       this._askResolve = null;
+      this._timing = null;
       done({ text, alts });
       return;
     }
@@ -420,6 +431,30 @@ export class VoiceInput extends Emitter {
     }
     for (const fn of this._text) fn(normalize(text), text, alts);
     this._dispatch(alts, { suppressFallback: intentMatched });
+    this._timingReport(text);
+  }
+
+  // ---- timing (shown with "Device log"): where does the delay come from? ----------------
+
+  _timingStart() {
+    this._timing ??= { start: performance.now() };
+  }
+
+  /** Logs one line per utterance; the speech output that follows is added when it starts. */
+  _timingReport(text) {
+    const t = this._timing;
+    this._timing = null;
+    if (!t || !this.rt) return;
+    const ms = (at) => (at == null ? '–' : `${Math.round(at - t.start)} ms`);
+    const command = t.command ? `${t.command} at ${ms(t.commandAt)}${t.interim ? ' (interim)' : ''}` : 'no command';
+    this.rt.log('device', `[Voice timing] "${text}": voice ${ms(t.start)}, first words ${ms(t.words)}, ${command}, final ${ms(t.final)}`);
+    if (!t.commandAt) return;
+    const off = this.rt.on('speechstart', () => {
+      off();
+      clearTimeout(timer);
+      this.rt.log('device', `[Voice timing] speech output starts ${Math.round(performance.now() - t.commandAt)} ms after the command`);
+    });
+    const timer = setTimeout(off, 5000);
   }
 
   /** Semantically compares open-ended transcripts with designer examples on-device. */
@@ -453,6 +488,7 @@ export class VoiceInput extends Emitter {
     const intent = candidates.find((candidate) => candidate.name === match?.id && this._intents.has(candidate));
     if (intent && !this._intentFired.has(intent)) {
       this._intentFired.add(intent);
+      if (this._timing && !this._timing.command) Object.assign(this._timing, { command: intent.name, commandAt: performance.now(), interim: !final });
       intent.fn({
         name: intent.name,
         text: match.text ?? alts[0],
@@ -516,6 +552,7 @@ export class VoiceInput extends Emitter {
           cmd.slots.forEach((s, i) => (args[s.name] = slotValue(m[i + 1] ?? '', s.type)));
           if (cmd.slots.some((s) => (s.type === 'zahl' || s.type === 'number') && args[s.name] == null)) continue;
           hit = true;
+          if (this._timing && !this._timing.command) Object.assign(this._timing, { command: cmd.raw, commandAt: performance.now() });
           cmd.fn(args, alt, cmd.raw);
         }
         if (hit) return true;
