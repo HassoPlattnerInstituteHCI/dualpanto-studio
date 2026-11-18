@@ -2008,6 +2008,16 @@ async function init() {
     e.stopImmediatePropagation();
     stopRun();
   }, true);
+  // B toggles blind mode while running: the stage goes dark, to try the program as a blind
+  // person would. On by default; the choice stays until the page is reloaded. The key still
+  // reaches the script.
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'b' || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !app.runtime?.running) return;
+    const t = e.target;
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable="true"], dialog')) return;
+    const blind = $('#run-view').classList.toggle('blind');
+    log('info', blind ? 'Blind mode on: the stage is hidden. Press B to show it.' : 'Blind mode off.');
+  });
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     // zoom keys work while a level is open, even if the canvas has no focus

@@ -395,9 +395,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .stage[data-drag] { cursor: grabbing; }
 .stage:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .stage-hint {
-  position: absolute; top: 8px; left: 10px; font-size: 11.5px; color: var(--fg-muted);
+  position: absolute; top: 8px; right: 10px; font-size: 11.5px; color: var(--fg-muted);
   background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 2px 8px; border-radius: 99px; pointer-events: none;
 }
+/* blind mode: the program runs, the stage stays dark (dragging still works) */
+.blind-note { display: none; position: absolute; inset: 0; place-content: center; text-align: center; padding: 0 16px; color: var(--fg-muted); font-size: 18px; font-weight: 550; pointer-events: none; }
+.run-view.blind .stage { opacity: 0; }
+.run-view.blind .stage-wrap { background: var(--stage-bg); }
+.run-view.blind .stage-hint { display: none; }
+.run-view.blind .blind-note { display: grid; }
 .run-console { flex: none; max-height: 34vh; display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--border); }
 .run-console summary { padding: 7px 14px; cursor: pointer; font-size: 12.5px; font-weight: 600; user-select: none; }
 .run-console[open] .console { overflow: auto; max-height: calc(34vh - 34px); padding-top: 0; }

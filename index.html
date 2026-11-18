@@ -255,7 +255,7 @@
     </section>
   </main>
 
-  <div id="run-view" class="run-view" hidden>
+  <div id="run-view" class="run-view blind" hidden>
     <header class="run-bar">
       <span class="logo" aria-hidden="true"></span>
       <strong id="run-title" class="run-title"></strong>
@@ -268,7 +268,8 @@
     </header>
     <div class="stage-wrap">
       <canvas id="stage" class="stage" tabindex="0" aria-label="Live preview"></canvas>
-      <div id="stage-hint" class="stage-hint">Me: drag · It: Shift + drag</div>
+      <div id="stage-hint" class="stage-hint">Me: drag · It: Shift + drag · B: blind mode</div>
+      <div class="blind-note" aria-live="polite">Blind mode · press B to see the stage</div>
     </div>
     <details id="run-console" class="run-console">
       <summary>Console <span id="run-console-count" class="muted small"></span></summary>
