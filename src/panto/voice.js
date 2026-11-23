@@ -371,15 +371,21 @@ export class VoiceInput extends Emitter {
    * speaking – but only what resembles the last spoken text is dropped. A real answer
    * may come right afterwards.
    */
-  _isEcho(text) {
-    const rt = this.rt;
-    if (!rt) return false;
-    const fresh = rt._speaking || Date.now() - (rt._spokeAt ?? 0) < this.echoWindow;
-    if (!fresh) return false;
-    const said = normalize(rt._lastSpoken ?? '');
+  /**
+   * Whether heard text is probably our own speech output: it resembles one of the last
+   * sentences spoken, and the utterance began (`at`) while that sentence was playing or
+   * shortly after. Judging by the start of the utterance matters, because Chrome often
+   * delivers the final transcript a second or two later.
+   */
+  _isEcho(text, at = this._timing?.at ?? Date.now()) {
     const heard = normalize(text);
-    if (!said || !heard) return rt._speaking;
-    return said.includes(heard) || similarity(said.slice(0, heard.length + 6), heard) > 0.6;
+    if (!this.rt || !heard) return false;
+    return (this.rt._recentSpeech ?? []).some(({ text: spoken, start, end }) => {
+      if (at < start - 300 || at - start > 15000) return false; // before it, or stale (an interrupted sentence may never report its end)
+      if (end && at - end > this.echoWindow) return false;
+      const said = normalize(spoken);
+      return !!said && (said.includes(heard) || similarity(said.slice(0, heard.length + 6), heard) > 0.6);
+    });
   }
 
   _onResult(ev) {
@@ -391,6 +397,9 @@ export class VoiceInput extends Emitter {
     if (this.rt) this.rt.heard = text;
     this._timingStart();
     this._timing.words ??= performance.now();
+    // dates the utterance for _isEcho; by its first words, not by "speechstart", which in
+    // continuous mode may stem from much earlier sound
+    this._timing.at ??= Date.now();
     if (!res.isFinal) {
       for (const fn of this._partial) fn(normalize(text), text);
       // interim results are checked for echo too: an interim intent could otherwise react

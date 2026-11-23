@@ -1050,11 +1050,15 @@ export class Runtime extends Emitter {
     this.caption = text;
     this.emit('speech', text);
     this.log('speech', text);
-    // Echo protection for voice input: what is being said right now, and since when?
+    // Echo protection for voice input: what is being said right now, and since when? The
+    // last few sentences are kept, because the microphone may hear an earlier one late.
     this._lastSpoken = text;
     this._spokeAt = Date.now();
+    const said = { text, start: Date.now(), end: 0 }; // end 0 = still speaking
+    this._recentSpeech = [...(this._recentSpeech ?? []).slice(-7), said];
     const seq = (this._speakSeq = (this._speakSeq ?? 0) + 1);
     const spoken = () => {
+      said.end ||= Date.now();
       if (seq !== this._speakSeq) return;
       this._speaking = false;
       this._spokeAt = Date.now();
