@@ -74,7 +74,7 @@ Notes:
 
 ## Layout
 
-- **Top bar:** project switcher (the name with ▾: rename, new project, all projects – later it will list all projects directly), save state, New and Projects. On the right: Reset, Boundary, Connect device, Self-test, the device status and ▶ Run.
+- **Top bar:** project switcher (the name with ▾: rename, new project, all projects – later it will list all projects directly), save state, New and Projects. On the right: Connect device, the Device menu (self-test, calibration, "Reset on connect", "Boundary wall on start"), the device status and ▶ Run.
 - **Left:** the program's main script, the levels as a slide overview (thumbnails, numbered) and, below them, the properties of the selected level or object.
 - **Center:** the level canvas with the tools, Clear, zoom, grid and undo/redo. "Square", "Rhombus" and "Full area" choose the level's work area (see below).
 - **Right:** the code editor on top ("Main" or the selected level's script), below it the tabs Sounds, Console and API.
@@ -239,7 +239,7 @@ The outlines are in `src/panto/areas.js`. They come from `ember_area.svg` in the
 
 - The **emulator** does not let the handles leave their area.
 - Level editor positions are constrained to the selected work area; script handle commands outside the device bounds are ignored by the hardware.
-- The edge of the Me area can be created as a wall on start ("Boundary" switch at the top, project setting `boundary`). **Off** by default: the outline costs one packet per point, and on the device the level's obstacles should arrive first. If Me is outside when it is switched on, the handle moves inside first.
+- The edge of the Me area can be created as a wall on start (Device menu → "Boundary wall on start", project setting `boundary`). **Off** by default: the outline costs one packet per point, and on the device the level's obstacles should arrive first. If Me is outside when it is switched on, the handle moves inside first.
 - When a level loads, the console warns about zones, rails and start positions outside. Walls may stick out over the edge.
 - Script API: `me.canReach(p)`, `panto.canReach(p, "both")`, `panto.area("it")`, `randomPoint(margin, handle)`.
 
@@ -269,9 +269,16 @@ A red box with the error message, file and line appears at the top (done by a sm
 
 1. Turn on "Device log" in the console. Every obstacle packet and every acknowledgement is then logged individually (`→ CREATE_OBSTACLE id 3`, `ACK 3`).
 2. After sending, the line "Obstacles acknowledged: … created, … enabled" must appear. If it is missing or says "Device does not acknowledge the packet", the packets are not arriving – that is a connection problem, not a level problem.
-3. **Self-test** (top right) creates exactly one wall across the middle. If you cannot feel that, the level is not the problem.
-4. Leave the "Boundary" switch off while something isn't working: the outline sends about 30 extra packets before anything else.
+3. **Device → Self-test** (top right) creates exactly one wall across the middle. If you cannot feel that, the level is not the problem.
+4. Leave "Boundary wall on start" off while something isn't working: the outline sends about 30 extra packets before anything else.
 5. The device acknowledges every state-changing packet before processing it. The app therefore pauses 10 ms between two such packets, as the Unity toolkit does with `ColliderRegistry` (10 ms per collider there).
+
+**Calibration** (Device menu, with a DualPanto connected):
+
+- **Calibrate handle direction** (protocol 0xA5): point both handles in their reference direction and confirm; that direction becomes the reference. It does not change the position.
+- **Tune motors** (0xAB, firmware with protocol revision 7): the device moves both handles on its own for up to about 4 minutes and tunes the P and D gains of the linkage motors, then reports the result in the console (0x94). Let go of the handles; starting a program cancels it. The tuned gains are saved on the device.
+- **Update firmware** opens the [DualPanto web uploader](https://hassoplattnerinstitutehci.github.io/dualpanto-web-uploader/), which flashes a prebuilt firmware of any dualpantoframework branch from the browser. The studio needs protocol revision 6 or 7; haptic graphs and motor tuning need 7 (e.g. `feature/haptic-graph-sinks`).
+- **Calibrate handle position** guides through the separate calibration firmware (`calibrationFirmware` in dualpantoframework) and links to it: the position can't be calibrated over the normal protocol. The firmware is uploaded with PlatformIO, takes the handles' position at start-up as zero, asks to rotate both handles clockwise three times, saves the result on the device, and then the normal firmware goes back on.
 
 ## Tested and not tested
 

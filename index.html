@@ -68,10 +68,11 @@
     </nav>
     <div class="spacer"></div>
     <div class="device">
-      <label class="check small" title="Restart the device when connecting (recommended)"><input id="opt-reset" type="checkbox" checked /> Reset</label>
-      <label class="check small" title="Create the edge of the Me area as a wall on start (many packets – leave off for testing)"><input id="opt-boundary" type="checkbox" /> Boundary</label>
       <button id="btn-connect" class="btn btn-secondary">Connect device</button>
-      <button id="btn-selftest" class="btn btn-ghost" title="Create and enable a single test wall">Self-test</button>
+      <div class="device-menu">
+        <button id="btn-device-menu" class="btn btn-ghost" aria-haspopup="menu" aria-expanded="false" aria-controls="device-menu" title="Self-test, calibration and connection options">Device <span class="caret" aria-hidden="true">▾</span></button>
+        <div id="device-menu" class="menu menu-right" role="menu" hidden></div>
+      </div>
       <span id="device-status" class="pill" data-state="emulator">Emulator</span>
     </div>
     <div class="run">
@@ -276,6 +277,18 @@
       <ol id="run-console-list" class="console"></ol>
     </details>
   </div>
+
+  <dialog id="dlg-calibrate" class="dialog dialog-narrow">
+    <div class="dialog-head">
+      <h2 id="calibrate-title"></h2>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <div id="calibrate-text" class="calibrate-text"></div>
+    <div class="dialog-actions">
+      <button id="calibrate-go" class="btn btn-primary"></button>
+      <button id="calibrate-cancel" class="btn btn-ghost">Cancel</button>
+    </div>
+  </dialog>
 
   <dialog id="dlg-new" class="dialog">
     <div class="dialog-head">

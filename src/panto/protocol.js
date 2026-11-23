@@ -191,6 +191,10 @@ export const build = {
   disableGraph: (index, id) => encodePacket(MSG.DISABLE_GRAPH, new PayloadWriter(3).u8(index).u16(id).bytes()),
   setGraphSinks: (index, id, radius, depth) =>
     encodePacket(MSG.SET_GRAPH_SINKS, new PayloadWriter(11).u8(index).u16(id).f32(radius).f32(depth).bytes()),
+  /** The current direction of the handles becomes the reference direction (no reply). */
+  calibratePanto: () => encodePacket(MSG.CALIBRATE_PANTO),
+  /** Revision 7: automatic tuning of the linkage motors' P and D gains, up to ~4 min; ends with PID_CALIBRATION_ENDED. */
+  calibratePid: (index) => encodePacket(MSG.CALIBRATE_PID, new PayloadWriter(1).u8(index).bytes()),
 };
 
 /**
@@ -304,6 +308,12 @@ export function decodePosition(view) {
 /** Decodes GRAPH_STATE: panto index (u8), state (u8, 1 entered), graph id (u16). */
 export function decodeGraphState(view) {
   return { index: view.getUint8(0), entered: view.getUint8(1) === 1, id: view.getUint16(2, false) };
+}
+
+/** Decodes PID_CALIBRATION_ENDED: panto index (u8), result (u8: 0 calibrated, 1 failed, 2 canceled), P, I, D (f32). */
+export function decodePidCalibration(view) {
+  const result = ['calibrated', 'failed', 'canceled'][view.getUint8(1)] ?? 'unknown';
+  return { index: view.getUint8(0), result, p: view.getFloat32(2, false), i: view.getFloat32(6, false), d: view.getFloat32(10, false) };
 }
 
 export function decodeText(payload) {

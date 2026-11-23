@@ -190,7 +190,6 @@ function openProject(project, { keepFolder = false } = {}) {
   if (!app.projects.some((p) => p.id === app.project.id)) app.projects.unshift(app.project);
   setCurrentId(app.project.id);
   renderProjectName();
-  $('#opt-boundary').checked = !!app.project.settings.boundary;
   // Throw away the old project's editor documents: "main" has the same name in the new
   // project, and a leftover document would overwrite its script.
   app.code?.reset();
@@ -1561,10 +1560,11 @@ async function toggleDevice() {
     return;
   }
   stopRun();
-  const serial = new SerialDevice({ profile: DEVICE_PROFILES[app.project.settings.device] ?? DEVICE_PROFILES.ember, resetOnConnect: $('#opt-reset').checked });
+  const serial = new SerialDevice({ profile: DEVICE_PROFILES[app.project.settings.device] ?? DEVICE_PROFILES.ember, resetOnConnect: app.resetOnConnect });
   serial.verbose = app.showDeviceLog;
   serial.on('log', (e) => log(e.level, e.text));
   serial.on('status', () => updateDeviceUi());
+  serial.on('pidCalibrated', reportMotorTuning);
   try {
     $('#device-status').dataset.state = 'waiting';
     $('#device-status').textContent = 'Connecting …';
@@ -1579,6 +1579,131 @@ async function toggleDevice() {
     app.serial = null;
     updateDeviceUi();
   }
+}
+
+// ---------------------------------------------------------------------------
+// device menu: self-test, calibration, connection options
+
+app.resetOnConnect = true;
+
+function runSelfTest() {
+  selectTab('console');
+  log('info', 'Self-test: creating a wall. Then move the Me handle slowly across it.');
+  run({ project: { id: app.project.id, name: 'Self-test', script: SELFTEST_SCRIPT, levels: [], settings: { ...app.project.settings, boundary: false } } });
+}
+
+function toggleDeviceMenu(open = $('#device-menu').hidden) {
+  const menu = $('#device-menu');
+  const btn = $('#btn-device-menu');
+  if (!open) {
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const serial = app.device?.kind === 'serial' && app.device.connected ? app.device : null;
+  const item = (label, onclick, { mark = '', disabled = false, title = '' } = {}) =>
+    h('button', { class: 'menu-item', role: 'menuitem', disabled, title, onclick: () => { toggleDeviceMenu(false); onclick(); } },
+      h('span', { class: 'check-mark', 'aria-hidden': 'true' }, mark), label);
+  const hint = (text) => h('div', { class: 'menu-hint' }, text);
+  // replaceChildren() would print a missing hint as "null"
+  menu.replaceChildren(...[
+    h('div', { class: 'menu-label' }, 'Device'),
+    item('Self-test', runSelfTest, { title: 'Create and enable a single test wall' }),
+    item('Calibrate handle direction …', calibrateDirection, { disabled: !serial }),
+    item('Tune motors …', tuneMotors, { disabled: !serial?.canTuneMotors }),
+    item('Calibrate handle position …', calibratePosition, { title: 'Needs the separate calibration firmware' }),
+    item('Update firmware …', () => window.open(FIRMWARE_UPLOADER_URL, '_blank', 'noopener'), { title: 'Opens the DualPanto web uploader' }),
+    !serial ? hint('Calibration needs a connected DualPanto.')
+      : !serial.canTuneMotors ? hint(`Tuning the motors needs firmware with protocol revision 7 (this one: ${serial.revision}).`) : null,
+    h('div', { class: 'menu-sep', role: 'separator' }),
+    item('Reset on connect', () => {
+      app.resetOnConnect = !app.resetOnConnect;
+      log('info', app.resetOnConnect ? 'The device restarts when connecting (recommended).' : 'The device no longer restarts when connecting.');
+    }, { mark: app.resetOnConnect ? '✓' : '', title: 'Restart the device when connecting (recommended)' }),
+    item('Boundary wall on start', () => {
+      app.project.settings.boundary = !app.project.settings.boundary;
+      scheduleSave();
+      log('info', app.project.settings.boundary ? 'The edge of the Me area will be created as a wall on start.' : 'The edge of the Me area is no longer created as a wall.');
+    }, { mark: app.project.settings.boundary ? '✓' : '', title: 'Create the edge of the Me area as a wall on start (many packets – leave off for testing)' }),
+  ].filter(Boolean));
+  menu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  menu.querySelector('.menu-item:not(:disabled)')?.focus();
+}
+
+/** Asks before a calibration (text: a string or elements); resolves with true when confirmed. */
+function confirmCalibration(title, text, go, cancel = 'Cancel') {
+  const dlg = $('#dlg-calibrate');
+  $('#calibrate-title').textContent = title;
+  $('#calibrate-text').replaceChildren(...(typeof text === 'string' ? [h('p', {}, text)] : text));
+  $('#calibrate-go').textContent = go;
+  $('#calibrate-cancel').textContent = cancel;
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      $('#calibrate-go').onclick = null;
+      dlg.onclose = null;
+      resolve(ok);
+    };
+    $('#calibrate-go').onclick = () => {
+      done(true);
+      dlg.close();
+    };
+    dlg.onclose = () => done(false);
+    dlg.showModal();
+  });
+}
+
+async function calibrateDirection() {
+  const ok = await confirmCalibration('Calibrate handle direction',
+    'Turn both handles so they point in their reference direction, then press Calibrate. Only the direction is calibrated, not the position.',
+    'Calibrate');
+  if (!ok || !app.device?.connected) return;
+  stopRun();
+  app.device.calibrateDirection();
+  selectTab('console');
+  log('info', 'Handle direction calibrated: the current direction is now the reference.');
+}
+
+async function tuneMotors() {
+  const ok = await confirmCalibration('Tune motors',
+    'The device moves both handles on its own and tunes its motor control, for up to about 4 minutes. Let go of the handles and keep the area clear. Starting a program or moving a handle cancels it. The result is saved on the device.',
+    'Start tuning');
+  if (!ok || !app.device?.connected) return;
+  stopRun();
+  app.device.tuneMotors();
+  selectTab('console');
+  log('info', 'Tuning the motors … let go of the handles (up to about 4 minutes).');
+}
+
+const FIRMWARE_UPLOADER_URL = 'https://hassoplattnerinstitutehci.github.io/dualpanto-web-uploader/';
+const CALIBRATION_FIRMWARE_URL = 'https://github.com/HassoPlattnerInstituteHCI/dualpantoframework/tree/BIS/calibrationFirmware';
+
+/**
+ * The position of the linkages can't be calibrated over the normal protocol: it needs the
+ * separate calibration firmware, which stores the encoder zeros on the device. This guides
+ * through it and links to the firmware.
+ */
+async function calibratePosition() {
+  const code = (t) => h('code', {}, t);
+  const open = await confirmCalibration('Calibrate handle position', [
+    h('p', {}, 'The position is calibrated with a separate firmware that has to be uploaded to the DualPanto once. It saves the result on the device; afterwards the normal firmware goes back on.'),
+    h('ol', {},
+      h('li', {}, 'Download the dualpantoframework repository and open the folder ', code('calibrationFirmware'), ' in PlatformIO (VS Code).'),
+      h('li', {}, 'Put both handles in their start position. The calibration takes the position at start-up as zero.'),
+      h('li', {}, 'Upload the calibration firmware and open the serial monitor (115200 baud).'),
+      h('li', {}, 'When it says "saved zero positions": rotate both handles clockwise three times, then back a bit.'),
+      h('li', {}, 'Wait for "Calibration finished!".'),
+      h('li', {}, 'Put the normal firmware back on (Device → Update firmware opens the web uploader) and connect in the studio.')),
+  ], 'Open calibration firmware', 'Close');
+  if (open) window.open(CALIBRATION_FIRMWARE_URL, '_blank', 'noopener');
+}
+
+function reportMotorTuning({ index, result, p, i, d }) {
+  const handle = index === 0 ? 'Me' : 'It';
+  const gains = `P ${p.toFixed(3)}, I ${i.toFixed(3)}, D ${d.toFixed(3)}`;
+  if (result === 'calibrated') log('info', `Motors of ${handle} tuned and saved: ${gains}.`);
+  else if (result === 'failed') log('warn', `Tuning the motors of ${handle} failed; the previous settings are kept (${gains}).`);
+  else log('warn', `Tuning the motors of ${handle} was canceled; the previous settings are kept.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1907,17 +2032,22 @@ async function init() {
   $('#btn-restart').addEventListener('click', () => run());
   $('#btn-connect').addEventListener('click', toggleDevice);
   $('#voice-status').addEventListener('click', toggleVoice);
-  $('#btn-selftest').addEventListener('click', () => {
-    selectTab('console');
-    log('info', 'Self-test: creating a wall. Then move the Me handle slowly across it.');
-    run({ project: { id: app.project.id, name: 'Self-test', script: SELFTEST_SCRIPT, levels: [], settings: { ...app.project.settings, boundary: false } } });
+  $('#btn-device-menu').addEventListener('click', () => toggleDeviceMenu());
+  document.addEventListener('pointerdown', (e) => {
+    if (!$('#device-menu').hidden && !e.target.closest('.device-menu')) toggleDeviceMenu(false);
   });
-  $('#opt-boundary').checked = !!app.project.settings.boundary;
-  $('#opt-boundary').addEventListener('change', (e) => {
-    app.project.settings.boundary = e.target.checked;
-    scheduleSave();
-    log('info', e.target.checked ? 'The edge of the Me area will be created as a wall on start.' : 'The edge of the Me area is no longer created as a wall.');
+  $('#device-menu').addEventListener('keydown', (e) => {
+    const items = [...$('#device-menu').querySelectorAll('.menu-item:not(:disabled)')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+      toggleDeviceMenu(false);
+      $('#btn-device-menu').focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    }
   });
+  $('#calibrate-cancel').addEventListener('click', () => $('#dlg-calibrate').close());
   $('#nav-script').addEventListener('click', () => selectCode('main'));
   for (const b of document.querySelectorAll('#code-target button')) b.addEventListener('click', () => selectCode(b.dataset.code));
   $('#btn-add-level').addEventListener('click', addLevel);

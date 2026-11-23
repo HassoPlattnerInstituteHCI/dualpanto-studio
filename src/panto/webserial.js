@@ -4,7 +4,7 @@
 import { Emitter } from './emitter.js';
 import {
   BAUD_RATE, REVISION, SUPPORTED_REVISIONS, GRAPH_REVISION, MSG, CONTROL, PANTO_BOTH, TRACKED,
-  PacketParser, build, obstaclePackets, graphPackets, withPacketId, decodePosition, decodeGraphState, decodeText,
+  PacketParser, build, obstaclePackets, graphPackets, withPacketId, decodePosition, decodeGraphState, decodePidCalibration, decodeText,
 } from './protocol.js';
 import { EMBER_AREAS } from './areas.js';
 
@@ -221,6 +221,11 @@ export class SerialDevice extends Emitter {
         this.emit('graphState', decodeGraphState(view));
         break;
       }
+      case MSG.PID_CALIBRATION_ENDED: {
+        if (view.byteLength < 14) break;
+        this.emit('pidCalibrated', decodePidCalibration(view));
+        break;
+      }
       case MSG.TRANSITION_ENDED:
         this.emit('transitionEnded', view.byteLength ? view.getUint8(0) : 0);
         break;
@@ -430,6 +435,27 @@ export class SerialDevice extends Emitter {
   freeze(index) {
     this._send(build.freeze(index));
   }
+  // ---- calibration ----------------------------------------------------------
+
+  /** The direction both handles point to right now becomes their reference direction. */
+  calibrateDirection() {
+    this._send(build.calibratePanto());
+  }
+
+  /** Whether the firmware can tune its motor gains (CALIBRATE_PID, revision 7). */
+  get canTuneMotors() {
+    return (this.revision ?? 0) >= GRAPH_REVISION;
+  }
+
+  /**
+   * Lets the device tune the linkage motors' PID gains; the handles move on their own for up
+   * to about 4 minutes. Each handle reports with a "pidCalibrated" event. Any motor, freeze or
+   * free message cancels it.
+   */
+  tuneMotors(index = PANTO_BOTH) {
+    this._send(build.calibratePid(index));
+  }
+
   // ---- haptic graphs (protocol revision 7) ---------------------------------
   get supportsGraphs() {
     return (this.revision ?? REVISION) >= GRAPH_REVISION;
