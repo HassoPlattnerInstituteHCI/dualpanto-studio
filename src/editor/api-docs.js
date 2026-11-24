@@ -608,7 +608,7 @@ voice.intent("move_left", {
 voice.onText((text) => log("heard: " + text));       // every sentence
 voice.onPartial((text) => …);                        // already while speaking
 voice.lastText     voice.isListening     voice.state`)}
-  <p>For <code>voice.intent</code>, <code>confidence</code> is cosine similarity (0–1), not a calibrated probability; browser recognition confidence is reported separately when available. Interim matches may act before the sentence is complete. Each intent fires once per utterance; set <code>interim: false</code> to wait for the final transcript. The compact model is English-oriented. This changes transcript interpretation; microphone recognition may still use Chrome's server unless on-device speech recognition is enabled.</p>
+  <p>For <code>voice.intent</code>, <code>confidence</code> is cosine similarity (0–1), not a calibrated probability; browser recognition confidence is reported separately when available. Interim matches may act before the sentence is complete. At most one intent fires per utterance, even if it matched on an interim result; set <code>interim: false</code> to wait for the final transcript. The compact model is English-oriented. This changes transcript interpretation; microphone recognition may still use Chrome's server unless on-device speech recognition is enabled.</p>
   <p><b>Asking questions</b> – better than <code>ui.prompt</code> when nobody sees the keyboard. The question is spoken, then the program listens; with no answer you get <code>null</code>.</p>
   ${code(`const text  = await voice.ask("What is the task called?");
 const score = await voice.ask("How many points?", { expect: "number" });

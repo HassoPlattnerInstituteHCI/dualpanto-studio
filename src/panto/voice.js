@@ -470,8 +470,10 @@ export class VoiceInput extends Emitter {
   async _dispatchIntents(alts, { final, recognitionConfidence }) {
     const revision = ++this._intentRevision;
     const alreadyMatched = this._intentFired.size > 0;
-    const candidates = [...this._intents].filter((intent) =>
-      (!this._intentFired.has(intent) && (final || intent.interim)));
+    // One intent per utterance: once one fired (usually on an interim result), the rest of the
+    // sentence must not trigger another one – the final "stop" would otherwise go to the
+    // closest remaining intent, e.g. "start over".
+    const candidates = alreadyMatched ? [] : [...this._intents].filter((intent) => final || intent.interim);
     if (!candidates.length || !alts.length) {
       if (final) this._intentFired.clear();
       return alreadyMatched;

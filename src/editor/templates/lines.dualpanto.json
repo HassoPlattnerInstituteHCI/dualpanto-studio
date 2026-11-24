@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "id": "tpl_lines",
+  "name": "Line drawing",
+  "description": "Vector drawing: say draw and stop to draw lines with Me; every line becomes a rail that It snaps onto, so you can trace what you drew.",
+  "script": "// Line drawing on the DualPanto (prototype): draw lines with Me, feel them with It.\n//\n// Me draws: say \"draw\", move Me, say \"stop\" – the path becomes a line.\n// It traces: move It with your other hand; it snaps onto the lines and follows them.\n//\n// Voice commands (say them any time):\n//   \"draw\", \"stop\"   start a line, end it (also ends \"show\")\n//   \"show\"           It moves along every line on its own\n//   \"undo\"           removes the last line\n//   \"clear all\"      removes every line\n//\n// The first run downloads the small on-device speech model (about 24 MB) and caches it.\n\nvoid voice.prepareIntents();\n",
+  "levels": [
+    {
+      "id": "l1",
+      "name": "Lines",
+      "view": "square",
+      "intro": "Lines. Say draw to draw with Me, stop to end the line. Trace it with It.",
+      "script": "// Level \"Lines\": vector drawing inside the frame.\n// Me draws: say \"draw\", move Me, say \"stop\" – the path becomes a line.\n// It traces: every line is a rail for It, so It snaps onto a line and follows it.\n// A beep tells when It reaches a line, a lower one when it leaves it.\n\nconst MIN_STEP = 2;        // mm between recorded points\nconst SIMPLIFY = 1;        // mm a line may deviate from the drawn path\nconst MAX_POINTS = 24;     // per line, so a line stays a handful of packets on the device\nconst MIN_LENGTH = 6;      // mm; shorter strokes are dropped\nconst ON_LINE = 3;         // mm from a line counts as \"on it\"\n\nlet lines = [];            // { points, rail }\nlet stroke = null;         // points of the line being drawn, or null\nlet touring = false;       // It is moved by the program\nlet stopTour = false;\n\nconst pathLength = (pts) => pts.reduce((sum, p, i) => (i ? sum + distance(pts[i - 1], p) : 0), 0);\n\n/** Distance from p to the segment a–b. */\nfunction segmentDistance(p, a, b) {\n  const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;\n  const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;\n  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));\n}\n\n/** Ramer–Douglas–Peucker: keeps the points that matter for the shape. */\nfunction simplify(pts, tolerance) {\n  if (pts.length < 3) return pts;\n  let worst = 0, index = 0;\n  for (let i = 1; i < pts.length - 1; i++) {\n    const d = segmentDistance(pts[i], pts[0], pts[pts.length - 1]);\n    if (d > worst) [worst, index] = [d, i];\n  }\n  if (worst <= tolerance) return [pts[0], pts[pts.length - 1]];\n  return [...simplify(pts.slice(0, index + 1), tolerance).slice(0, -1), ...simplify(pts.slice(index), tolerance)];\n}\n\nasync function chirp(from, to) {\n  await sound.beep(from, 50, { volume: 0.15 });\n  sound.beep(to, 70, { volume: 0.15 });\n}\n\n// --- Me draws ---------------------------------------------------------------\n\nfunction startDrawing() {\n  if (stroke) return;\n  stroke = [{ ...me.position }];\n  chirp(500, 800);\n}\n\nfunction stopDrawing() {\n  stopTour = true;\n  if (!stroke) return;\n  const drawn = stroke;\n  stroke = null;\n  chirp(800, 500);\n  if (pathLength(drawn) < MIN_LENGTH) return speak(\"Too short.\", { interrupt: true });\n  let tolerance = SIMPLIFY, points = simplify(drawn, tolerance);\n  while (points.length > MAX_POINTS) points = simplify(drawn, (tolerance *= 1.5));\n  const rail = panto.rail(points, { strength: 4, handles: \"it\", name: `Line ${lines.length + 1}` });\n  lines.push({ points, rail });\n  speak(`Line ${lines.length}.`, { interrupt: true });\n}\n\nlet sinceTick = 0;\nme.onMove((p) => {\n  if (!stroke) return;\n  const last = stroke[stroke.length - 1];\n  const step = distance(last, p);\n  if (step < MIN_STEP) return;\n  stroke.push({ x: p.x, y: p.y });\n  sinceTick += step;\n  if (sinceTick > 10) {\n    sinceTick = 0;\n    sound.beep(660, 20, { volume: 0.08 }); // the pen is moving\n  }\n});\n\n// --- It traces --------------------------------------------------------------\n\nconst nearLine = (p) => lines.some(({ points }) => points.some((q, i) => i && segmentDistance(p, points[i - 1], q) < ON_LINE));\n\nlet onLine = false;\nit.onMove((p) => {\n  if (touring) return;\n  const now = nearLine(p);\n  if (now === onLine) return;\n  onLine = now;\n  sound.beep(now ? 880 : 330, 60, { volume: 0.2 });\n});\n\n/** \"show\": It moves along every line on its own. */\nasync function show() {\n  if (touring) return;\n  if (!lines.length) return speak(\"Nothing drawn yet.\", { interrupt: true });\n  touring = true;\n  stopTour = false;\n  await speak(lines.length === 1 ? \"1 line.\" : `${lines.length} lines.`, { interrupt: true });\n  for (const { points } of lines) {\n    for (const q of points) {\n      if (stopTour) break;\n      await it.moveTo(q, { hold: true });\n    }\n    if (stopTour) break;\n    sound.beep(880, 80, { volume: 0.15 });\n    await wait(300);\n  }\n  it.free();\n  touring = false;\n}\n\nfunction undo() {\n  const line = lines.pop();\n  if (!line) return speak(\"Nothing to undo.\", { interrupt: true });\n  line.rail.remove();\n  speak(`Removed line ${lines.length + 1}.`, { interrupt: true });\n}\n\nfunction clearAll() {\n  lines.forEach(({ rail }) => rail.remove());\n  lines = [];\n  speak(\"Cleared.\", { interrupt: true });\n}\n\n// --- voice commands ---------------------------------------------------------\n// \"draw\" and \"stop\" react while you are still speaking (interim result, strict threshold).\n\nvoice.intent(\"draw\", { examples: [\"draw\", \"pen down\", \"start drawing\"], threshold: 0.9, onMatch: startDrawing });\nvoice.intent(\"stop\", { examples: [\"stop\", \"lift\", \"pen up\", \"stop drawing\"], threshold: 0.9, onMatch: stopDrawing });\nvoice.intent(\"show\", { examples: [\"show\", \"show me\", \"trace the drawing\", \"show the lines\"], interim: false, onMatch: show });\nvoice.intent(\"undo\", { examples: [\"undo\", \"remove the last line\", \"delete last line\"], interim: false, onMatch: undo });\nvoice.intent(\"clear\", { examples: [\"clear all\", \"delete everything\", \"start over\"], interim: false, onMatch: clearAll });\n",
+      "spawn": {
+        "me": {
+          "x": 155,
+          "y": 128
+        },
+        "it": {
+          "x": 205,
+          "y": 78
+        }
+      },
+      "objects": [
+        {
+          "id": "w1",
+          "type": "wall",
+          "name": "Frame",
+          "points": [
+            {
+              "x": 140,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 63
+            },
+            {
+              "x": 220,
+              "y": 143
+            },
+            {
+              "x": 140,
+              "y": 143
+            }
+          ],
+          "closed": true,
+          "handles": "both"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "lang": "en-US"
+  }
+}
